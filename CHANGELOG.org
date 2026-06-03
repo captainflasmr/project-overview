@@ -1,0 +1,8 @@
+#+TITLE: Changelog for project-overview
+
+* [0.1.0] - 2026-06-03
+** Added
+- ~project-overview~: a sortable ~tabulated-list-mode~ dashboard with one row per auto-discovered git project under ~project-overview-search-roots~ (each root and its immediate git subdirs, minus ~project-overview-exclude-regexp~).  Columns show the project name, latest ~CHANGELOG.org~ version and date, open/total ~BUGS.org~ count (~TODO~/~DOING~ vs all), git branch, a dirty/ahead-behind flag, and the last commit date.
+- Single-key actions on the project under point: ~RET~/~o~ switch (~project-switch-project~), ~f~ find file, ~m~ ~magit-status~, ~s~ search (~consult-ripgrep~ when available, else project grep), ~d~ dired, ~!~ shell, ~c~ open ~CHANGELOG.org~, ~v~ preview the latest changelog entry in a side window, ~b~ open ~BUGS.org~, ~B~ a TODO agenda scoped to that project's bugs, and ~g~ refresh.
+- ~project-overview-dispatch~ (bound to ~?~): a ~transient~ menu presenting the same actions grouped into columns, headed by the project under point.
+- Customisation: ~project-overview-search-roots~, ~project-overview-exclude-regexp~ and ~project-overview-buffer-name~.
