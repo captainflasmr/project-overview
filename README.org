@@ -1,0 +1,84 @@
+#+title: project-overview
+#+author: James Dyer
+#+email: captainflasmr@gmail.com
+#+language: en
+#+options: ':t toc:nil author:nil email:nil num:nil title:nil
+
+A central, sortable table of your git projects. =M-x project-overview=
+opens a =tabulated-list-mode= buffer with one row per auto-discovered git
+repository, surfacing the kind of status you usually have to dig for:
+
+#+begin_example
+Project                   Version   Changed       Bugs   Branch   Git   Commit
+bank-buddy                0.3.1     2026-01-16            main           2026-01-16
+ollama-buddy              7.5.3     2026-05-19    2/15   main     *      2026-06-02
+simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2     2026-05-31
+#+end_example
+
+* What each column means
+
+- *Version / Changed* :: parsed from the first =** <date> *X.Y.Z*= heading in
+  the project's =CHANGELOG.org=.
+- *Bugs* :: =open/total= count from =BUGS.org= (=TODO=/=DOING= vs everything,
+  including =DONE=). Highlighted when there are open items.
+- *Branch / Git* :: current branch, =*= when the worktree is dirty, and
+  =↑n=/=↓n= for commits ahead of / behind the upstream.
+- *Commit* :: date of the last commit.
+
+Click a column header (or press =S=) to sort by it.
+
+* Actions
+
+Single keys act on the project under point:
+
+| Key       | Action                                       |
+|-----------+----------------------------------------------|
+| =RET= / =o= | switch to project (=project-switch-project=) |
+| =f=         | find file in project                         |
+| =m=         | =magit-status=                               |
+| =s=         | search (=consult-ripgrep=, else project grep)|
+| =d=         | dired at root                                |
+| =!=         | shell at root                                |
+| =c=         | open =CHANGELOG.org=                          |
+| =v=         | preview latest =CHANGELOG.org= entry          |
+| =b=         | open =BUGS.org=                               |
+| =B=         | TODO agenda scoped to this project's bugs    |
+| =g=         | refresh (re-scan)                            |
+| =?=         | transient menu of all the above              |
+
+Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
+same actions grouped into columns, headed by the project under point.
+
+* Installation
+
+#+begin_src emacs-lisp
+(use-package project-overview
+  :ensure nil
+  :load-path "~/.emacs.d/offline-packages/local-packages/project-overview"
+  :commands (project-overview)
+  :custom
+  (project-overview-search-roots
+   (list "~/source/repos" "~/.emacs.d"))
+  ;; Hide noise such as kernel source trees.
+  (project-overview-exclude-regexp "\\`\\(linux-\\|melpa\\|themes\\'\\)"))
+#+end_src
+
+* Customization
+
+- =project-overview-search-roots= :: directories scanned for git projects.
+  Each root is checked directly and one level deep for =.git= subdirs.
+- =project-overview-exclude-regexp= :: project directory names matching this
+  regexp are hidden.
+- =project-overview-buffer-name= :: name of the dashboard buffer.
+
+* Notes
+
+The =CHANGELOG.org= and =BUGS.org= parsing assumes the common org layout:
+
+#+begin_example
+#+todo: TODO DOING | DONE
+* Versions
+** <2026-05-19 Tue> *7.5.3*
+#+end_example
+
+but degrades gracefully when a file is missing or differently shaped.
