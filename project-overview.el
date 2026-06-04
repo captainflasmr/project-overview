@@ -40,8 +40,8 @@
 ;; Keys mirroring the `project-switch-project' menu act on the project
 ;; under point:
 ;;
-;;   RET / o  switch to project        c  open CHANGELOG.org
-;;   f        find file                V  preview latest CHANGELOG entry
+;;   RET / o  switch to project        c  preview latest CHANGELOG entry
+;;   f        find file                C  open CHANGELOG.org (window right)
 ;;   g        find regexp              b  open BUGS.org (window right)
 ;;   d        find directory           B  TODO agenda for this project's bugs
 ;;   e        eshell                   A  TODO agenda for all projects' bugs
@@ -363,11 +363,13 @@ empty string when no README or prose is found."
   (project-overview--run-project-command #'project-eshell))
 
 (defun project-overview-changelog ()
-  "Visit CHANGELOG.org of the project under point."
+  "Visit CHANGELOG.org of the project under point in a window to the right."
   (interactive)
   (let ((f (expand-file-name "CHANGELOG.org" (project-overview--root))))
-    (if (file-exists-p f) (find-file f)
-      (user-error "No CHANGELOG.org in this project"))))
+    (unless (file-exists-p f) (user-error "No CHANGELOG.org in this project"))
+    (select-window
+     (display-buffer (find-file-noselect f)
+                     '(display-buffer-in-direction (direction . right))))))
 
 (defun project-overview-bugs-file ()
   "Visit BUGS.org of the project under point in a window to the right."
@@ -539,8 +541,8 @@ The entry is shown read-only in a right-hand side window."
     ("D" "dired"             project-overview-dired)
     ("!" "shell"             project-overview-shell)]
    ["Inspect"
-    ("c" "CHANGELOG.org"     project-overview-changelog)
-    ("V" "preview changelog" project-overview-changelog-preview)
+    ("c" "preview changelog" project-overview-changelog-preview)
+    ("C" "CHANGELOG.org"     project-overview-changelog)
     ("b" "BUGS.org"          project-overview-bugs-file)
     ("B" "bugs agenda"       project-overview-bugs-agenda)
     ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)]
@@ -569,8 +571,8 @@ The entry is shown read-only in a right-hand side window."
     (define-key map "D" #'project-overview-dired)
     (define-key map "!" #'project-overview-shell)
     ;; Inspect.
-    (define-key map "c" #'project-overview-changelog)
-    (define-key map "V" #'project-overview-changelog-preview)
+    (define-key map "c" #'project-overview-changelog-preview)
+    (define-key map "C" #'project-overview-changelog)
     (define-key map "b" #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)

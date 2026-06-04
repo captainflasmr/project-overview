@@ -46,8 +46,8 @@ the same keys as the =project-switch-project= menu:
 | =m=         | =magit-status=                               |
 | =D=         | dired at root                                |
 | =!=         | shell at root                                |
-| =c=         | open =CHANGELOG.org=                          |
-| =V=         | preview latest =CHANGELOG.org= entry          |
+| =c=         | preview latest =CHANGELOG.org= entry          |
+| =C=         | open =CHANGELOG.org= in a window to the right  |
 | =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs    |
 | =A=         | TODO agenda for every project's bugs         |
