@@ -34,6 +34,9 @@
 ;;   - the last commit date, and
 ;;   - a one-line description taken from the project's README.
 ;;
+;; A header line summarises the whole set: total projects, how many are
+;; dirty, how many are out of sync with upstream, and the open bug count.
+;;
 ;; Single keys act on the project under point, reusing project.el where
 ;; possible.  See `project-overview-mode-map' for the full set:
 ;;
@@ -237,7 +240,7 @@ empty string when no README or prose is found."
          (status (project-overview--git root "status" "--porcelain"))
          (dirty (and status (> (length status) 0)))
          (commit (or (project-overview--git root "log" "-1" "--format=%cd"
-                                            "--date=short")
+                                            "--date=format:%Y-%m-%d %H:%M")
                      ""))
          (ab (project-overview--git root "rev-list" "--left-right" "--count"
                                     "HEAD...@{u}"))
@@ -645,6 +648,33 @@ shown/total counts and redraws."
    ("a" "all (clear filter)"          project-overview-filter-clear)
    ("q" "quit"                        transient-quit-one)])
 
+;;; Header line
+
+(defun project-overview--header-count (n label)
+  "Return header-line segment \" · N LABEL\", emphasised when N is positive."
+  (propertize (format " · %d %s" n label)
+              'face (if (> n 0) 'warning 'shadow)))
+
+(defun project-overview--header-line ()
+  "Return the aggregate status header-line for the dashboard.
+Counts are taken from the full project set, independent of any active
+filter (which is reported separately in the mode line)."
+  (let* ((cache project-overview--cache)
+         (total (length cache))
+         (dirty (seq-count #'project-overview--filter-dirty cache))
+         (sync  (seq-count #'project-overview--filter-out-of-sync cache))
+         (buggy (seq-count #'project-overview--filter-bugs cache))
+         (open  (apply #'+ (mapcar (lambda (c) (plist-get (cdr c) :open)) cache))))
+    (concat
+     (propertize (format " %d project%s" total (if (= total 1) "" "s"))
+                 'face 'bold)
+     (project-overview--header-count dirty "dirty")
+     (project-overview--header-count sync "out of sync")
+     (project-overview--header-count
+      open (format "open bug%s%s"
+                   (if (= open 1) "" "s")
+                   (if (> buggy 0) (format " in %d" buggy) ""))))))
+
 ;;; Mode
 
 (defvar project-overview-mode-map
@@ -681,15 +711,20 @@ shown/total counts and redraws."
   (setq tabulated-list-format
         [("Project" 24 t)
          ("Version" 9 t)
-         ("Changed" 12 t)
+         ("ChangeLog" 12 t)
          ("Bugs" 7 t)
          ("Branch" 14 t)
          ("Git" 6 t)
-         ("Commit" 12 t)
+         ("Commit" 17 t)
          ("Description" 50 t)])
-  (setq tabulated-list-sort-key '("Project" . nil))
+  ;; Most recently committed projects first.
+  (setq tabulated-list-sort-key '("Commit" . t))
   (setq tabulated-list-entries #'project-overview--entries)
-  (tabulated-list-init-header))
+  ;; Free the window header line for the aggregate summary by printing the
+  ;; (still sortable) column headers at the top of the buffer instead.
+  (setq tabulated-list-use-header-line nil)
+  (tabulated-list-init-header)
+  (setq header-line-format '(:eval (project-overview--header-line))))
 
 ;;;###autoload
 (defun project-overview ()

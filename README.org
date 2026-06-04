@@ -9,25 +9,37 @@ opens a =tabulated-list-mode= buffer with one row per auto-discovered git
 repository, surfacing the kind of status you usually have to dig for:
 
 #+begin_example
-Project                   Version   Changed       Bugs   Branch   Git   Commit
-bank-buddy                0.3.1     2026-01-16            main           2026-01-16
-ollama-buddy              7.5.3     2026-05-19    2/15   main     *      2026-06-02
-simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2     2026-05-31
+Project                   Version   ChangeLog     Bugs   Branch   Git   Commit
+ollama-buddy              7.5.3     2026-05-19    2/15   main     *      2026-06-02 14:32
+simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2     2026-05-31 09:18
+bank-buddy                0.3.1     2026-01-16            main           2026-01-16 21:05
 #+end_example
+
+The table opens sorted by =Commit= date/time, most recently committed first.
 
 * What each column means
 
-- *Version / Changed* :: parsed from the first =** <date> *X.Y.Z*= heading in
+- *Version / ChangeLog* :: parsed from the first =** <date> *X.Y.Z*= heading in
   the project's =CHANGELOG.org=.
 - *Bugs* :: =open/total= count from =BUGS.org= (=TODO=/=DOING= vs everything,
   including =DONE=). Highlighted when there are open items.
 - *Branch / Git* :: current branch, =*= when the worktree is dirty, and
   =↑n=/=↓n= for commits ahead of / behind the upstream.
-- *Commit* :: date of the last commit.
+- *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving
+  a granular default sort.
 - *Description* :: the first sentence of the project's =README.org= (or
   =README.md=), collapsed to a single line.
 
 Click a column header (or press =S=) to sort by it.
+
+A header line shows aggregate status across all projects, e.g.:
+
+#+begin_example
+ 42 projects · 5 dirty · 3 out of sync · 28 open bugs in 9
+#+end_example
+
+The counts cover the full set regardless of any active filter; positive
+counts are highlighted so problem areas stand out at a glance.
 
 * Actions
 
