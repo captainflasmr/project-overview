@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.1.0
-;; Package-Version: 0.1.0
+;; Version: 0.2.0
+;; Package-Version: 0.2.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -25,12 +25,17 @@
 
 ;;; Commentary:
 ;; A central, sortable table of your git projects.  `project-overview'
-;; opens a `tabulated-list-mode' buffer with one row per auto-discovered
-;; git repository under `project-overview-search-roots', showing:
+;; opens a `tabulated-list-mode' buffer with one row per project: the git
+;; repositories found under `project-overview-search-roots' plus, when
+;; `project-overview-include-known-projects' is on, the projects Emacs
+;; already knows about (the `project-switch-project' list).  Each row
+;; shows:
 ;;
 ;;   - the latest CHANGELOG.org version and date,
 ;;   - the open/total bug count from BUGS.org,
 ;;   - git branch, dirty flag, and ahead/behind state,
+;;   - the remote forge (github, gitlab, …) or blank for local-only,
+;;   - a check mark when the project is on Emacs's known-projects list,
 ;;   - the last commit date, and
 ;;   - a one-line description taken from the project's README.
 ;;
@@ -83,6 +88,7 @@
 (declare-function consult-ripgrep "ext:consult" (&optional dir initial))
 (declare-function org-todo-list "org-agenda" (&optional arg))
 (declare-function org-mode "org" ())
+(declare-function project-known-project-roots "project" ())
 (defvar org-agenda-files)
 (defvar org-agenda-prefix-format)
 (defvar org-agenda-sticky)
@@ -105,6 +111,14 @@ Each root is checked directly and one level deep for .git subdirs."
 (defcustom project-overview-exclude-regexp "\\`linux-"
   "Projects whose directory name matches this regexp are hidden."
   :type 'regexp
+  :group 'project-overview)
+
+(defcustom project-overview-include-known-projects t
+  "When non-nil, also list projects Emacs already knows about.
+These are the roots offered by `project-switch-project', as returned by
+`project-known-project-roots', merged with the git repositories found
+under `project-overview-search-roots'."
+  :type 'boolean
   :group 'project-overview)
 
 (defcustom project-overview-buffer-name "*Projects*"
@@ -134,8 +148,16 @@ LABEL is a short string shown in the mode line.")
         (string-trim (buffer-string))))))
 
 (defun project-overview--discover ()
-  "Return a sorted list of git project roots under `project-overview-search-roots'."
+  "Return the sorted list of project roots to display.
+Combines git repositories found under `project-overview-search-roots'
+\(each root and one level of subdirectories) with the projects Emacs
+already knows about — `project-known-project-roots', the same list
+`project-switch-project' offers — when
+`project-overview-include-known-projects' is non-nil.  Roots are
+normalised and de-duplicated; missing directories and names matching
+`project-overview-exclude-regexp' are dropped."
   (let (roots)
+    ;; Git repositories under the configured search roots.
     (dolist (root project-overview-search-roots)
       (setq root (expand-file-name root))
       (when (file-directory-p root)
@@ -145,12 +167,33 @@ LABEL is a short string shown in the mode line.")
           (when (and (file-directory-p sub)
                      (file-directory-p (expand-file-name ".git" sub)))
             (push sub roots)))))
-    (sort (seq-remove
-           (lambda (r)
-             (string-match-p project-overview-exclude-regexp
-                             (file-name-nondirectory (directory-file-name r))))
-           (delete-dups roots))
-          #'string<)))
+    ;; Projects Emacs already knows about (the `project-switch-project' list).
+    (when (and project-overview-include-known-projects
+               (fboundp 'project-known-project-roots))
+      (setq roots (nconc (project-known-project-roots) roots)))
+    ;; Normalise, drop missing/excluded, de-duplicate, and sort.
+    (let ((seen (make-hash-table :test 'equal))
+          result)
+      (dolist (r roots)
+        (let ((dir (directory-file-name (expand-file-name r))))
+          (when (and (not (gethash dir seen))
+                     (file-directory-p dir)
+                     (not (string-match-p
+                           project-overview-exclude-regexp
+                           (file-name-nondirectory dir))))
+            (puthash dir t seen)
+            (push dir result))))
+      (sort result #'string<))))
+
+(defun project-overview--known-roots ()
+  "Return a hash table of normalised `project-known-project-roots'.
+Keys match the normalised roots produced by `project-overview--discover',
+so membership can be tested with `gethash'."
+  (let ((h (make-hash-table :test 'equal)))
+    (when (fboundp 'project-known-project-roots)
+      (dolist (r (project-known-project-roots))
+        (puthash (directory-file-name (expand-file-name r)) t h)))
+    h))
 
 (defun project-overview--changelog (root)
   "Return cons (VERSION . DATE) from the latest CHANGELOG.org entry in ROOT.
@@ -233,8 +276,34 @@ empty string when no README or prose is found."
                 (match-string 1 text)
               text)))))))
 
+(defun project-overview--remote-host (url)
+  "Return a short forge label for git remote URL, or \"\" when unknown.
+Recognises common forges by name and otherwise falls back to the bare
+host extracted from the URL (handles https://, ssh:// and scp-like
+\"git@host:path\" forms)."
+  (if (or (null url) (string-empty-p url))
+      ""
+    (cond
+     ((string-match-p "github\\.com" url)    "github")
+     ((string-match-p "gitlab\\.com" url)    "gitlab")
+     ((string-match-p "codeberg\\.org" url)  "codeberg")
+     ((string-match-p "bitbucket\\.org" url) "bitbucket")
+     ((string-match-p "\\(?:sr\\.ht\\|sourcehut\\)" url) "sourcehut")
+     ((string-match "\\(?:://\\(?:[^@/]+@\\)?\\|@\\)\\([^/:]+\\)" url)
+      (match-string 1 url))
+     (t ""))))
+
+(defun project-overview--remote-url (root)
+  "Return the URL of ROOT's origin remote, or the first remote, else nil."
+  (or (project-overview--git root "config" "--get" "remote.origin.url")
+      (let ((remotes (project-overview--git root "remote")))
+        (when (and remotes (not (string-empty-p remotes)))
+          (project-overview--git root "config" "--get"
+                                 (format "remote.%s.url"
+                                         (car (split-string remotes "\n"))))))))
+
 (defun project-overview--git-info (root)
-  "Return a plist :branch :dirty :commit :ahead :behind describing ROOT's git."
+  "Return a plist :branch :dirty :commit :ahead :behind :host for ROOT."
   (let* ((branch (or (project-overview--git root "symbolic-ref" "--short" "HEAD")
                      (project-overview--git root "rev-parse" "--short" "HEAD")
                      ""))
@@ -245,30 +314,34 @@ empty string when no README or prose is found."
                      ""))
          (ab (project-overview--git root "rev-list" "--left-right" "--count"
                                     "HEAD...@{u}"))
+         (host (project-overview--remote-host
+                (project-overview--remote-url root)))
          ahead behind)
     (when (and ab (string-match "\\([0-9]+\\)[ \t]+\\([0-9]+\\)" ab))
       (setq ahead (string-to-number (match-string 1 ab))
             behind (string-to-number (match-string 2 ab))))
     (list :branch branch :dirty dirty :commit commit
-          :ahead (or ahead 0) :behind (or behind 0))))
+          :ahead (or ahead 0) :behind (or behind 0) :host host)))
 
 (defun project-overview--scan ()
   "Scan all discovered projects and populate `project-overview--cache'."
-  (setq project-overview--cache
-        (mapcar
-         (lambda (root)
-           (let ((cl (project-overview--changelog root))
-                 (bugs (project-overview--bugs root))
-                 (git (project-overview--git-info root)))
-             (cons root
-                   (list :name (file-name-nondirectory (directory-file-name root))
-                         :version (or (car cl) "")
-                         :changed (or (cdr cl) "")
-                         :open (car bugs)
-                         :total (cdr bugs)
-                         :desc (project-overview--description root)
-                         :git git))))
-         (project-overview--discover))))
+  (let ((known (project-overview--known-roots)))
+    (setq project-overview--cache
+          (mapcar
+           (lambda (root)
+             (let ((cl (project-overview--changelog root))
+                   (bugs (project-overview--bugs root))
+                   (git (project-overview--git-info root)))
+               (cons root
+                     (list :name (file-name-nondirectory (directory-file-name root))
+                           :version (or (car cl) "")
+                           :changed (or (cdr cl) "")
+                           :open (car bugs)
+                           :total (cdr bugs)
+                           :desc (project-overview--description root)
+                           :known (and (gethash root known) t)
+                           :git git))))
+           (project-overview--discover)))))
 
 ;;; Rendering
 
@@ -298,6 +371,8 @@ empty string when no README or prose is found."
                   bugs
                   (plist-get git :branch)
                   (project-overview--git-flag git)
+                  (or (plist-get git :host) "")
+                  (if (plist-get p :known) "✓" "")
                   (plist-get git :commit)
                   (propertize (plist-get p :desc) 'face 'shadow)))))
 
@@ -733,6 +808,8 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
          ("Bugs" 7 t)
          ("Branch" 14 t)
          ("Git" 6 t)
+         ("Remote" 10 t)
+         ("Known" 6 t)
          ("Commit" 17 t)
          ("Description" 50 t)])
   ;; Most recently committed projects first.

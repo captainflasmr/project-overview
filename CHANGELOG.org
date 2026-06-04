@@ -1,5 +1,26 @@
 #+TITLE: Changelog for project-overview
 
+* [0.2.0] - 2026-06-04
+** Added
+- Combined bugs agenda: ~project-overview-bugs-agenda-all~ (~A~) gathers every discovered project's ~BUGS.org~ into a single TODO agenda, each entry categorised by its project; redo (~g~) keeps the same file scope and column alignment.
+- Project actions mirroring the ~project-switch-project~ menu, acting on the project under point: ~G~ find regexp, ~d~ find directory, ~v~ ~vc-dir~, and ~e~ ~eshell~ (alongside the existing ~f~ find file and ~s~ search).
+- Filtering (~/~, ~project-overview-filter-dispatch~): narrow the table to dirty repos, repos with open bugs, repos out of sync with upstream, or a name regexp; clear with ~/ a~.  The active filter is shown in the header line and mode line and survives a refresh.
+- Header line summarising the whole set: total projects, and how many are dirty, out of sync, and have open bugs, with bold emphasis on non-zero values.
+- Mode line shows the full (abbreviated) path of the project under point.
+- ~Description~ column: the first sentence of the project's ~README.org~ or ~README.md~.
+- ~Remote~ column: the forge hosting ~origin~ (~github~, ~gitlab~, ~codeberg~, ~bitbucket~, ~sourcehut~, or the bare host); blank for local-only repos.
+- ~Known~ column: ~✓~ when the project is on Emacs's known-projects list.
+- ~project-overview-include-known-projects~ (default on): merge ~project-known-project-roots~ (the ~project-switch-project~ list) into discovery alongside ~project-overview-search-roots~; non-git projects show blank git columns.
+** Changed
+- ~b~ (~BUGS.org~) and ~C~ (~CHANGELOG.org~) now open in a window to the right; ~c~ previews the latest changelog entry (word-wrapped) in a side window.
+- Default sort is now the last commit date/time, newest first, and the commit column shows ~YYYY-MM-DD HH:MM~ for a more granular sort.
+- Renamed the ~Changed~ column to ~ChangeLog~.
+- The header line uses the theme's ~header-line~ face throughout, for readable contrast on any theme.
+- Point starts on the first project row when the dashboard opens.
+- ~g~ now refreshes (re-scan) and ~G~ runs find regexp.
+** Fixed
+- The single-project (~B~) and all-projects (~A~) bugs agendas no longer show identical contents when ~org-agenda-sticky~ is enabled; each now regenerates against its own file set.
+
 * [0.1.0] - 2026-06-03
 ** Added
 - ~project-overview~: a sortable ~tabulated-list-mode~ dashboard with one row per auto-discovered git project under ~project-overview-search-roots~ (each root and its immediate git subdirs, minus ~project-overview-exclude-regexp~).  Columns show the project name, latest ~CHANGELOG.org~ version and date, open/total ~BUGS.org~ count (~TODO~/~DOING~ vs all), git branch, a dirty/ahead-behind flag, and the last commit date.

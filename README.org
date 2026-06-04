@@ -5,14 +5,16 @@
 #+options: ':t toc:nil author:nil email:nil num:nil title:nil
 
 A central, sortable table of your git projects. =M-x project-overview=
-opens a =tabulated-list-mode= buffer with one row per auto-discovered git
-repository, surfacing the kind of status you usually have to dig for:
+opens a =tabulated-list-mode= buffer with one row per project — the git
+repositories found under =project-overview-search-roots= plus the
+projects Emacs already knows about (the =project-switch-project= list) —
+surfacing the kind of status you usually have to dig for:
 
 #+begin_example
-Project                   Version   ChangeLog     Bugs   Branch   Git   Commit
-ollama-buddy              7.5.3     2026-05-19    2/15   main     *      2026-06-02 14:32
-simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2     2026-05-31 09:18
-bank-buddy                0.3.1     2026-01-16            main           2026-01-16 21:05
+Project                   Version   ChangeLog     Bugs   Branch   Git   Remote   Known   Commit
+ollama-buddy              7.5.3     2026-05-19    2/15   main     *     github   ✓       2026-06-02 14:32
+simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2    github   ✓       2026-05-31 09:18
+bank-buddy                0.3.1     2026-01-16            main          gitlab           2026-01-16 21:05
 #+end_example
 
 The table opens sorted by =Commit= date/time, most recently committed first.
@@ -25,6 +27,12 @@ The table opens sorted by =Commit= date/time, most recently committed first.
   including =DONE=). Highlighted when there are open items.
 - *Branch / Git* :: current branch, =*= when the worktree is dirty, and
   =↑n=/=↓n= for commits ahead of / behind the upstream.
+- *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=,
+  =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.
+  Blank for repositories with no remote (local only).
+- *Known* :: =✓= when the project is on Emacs's known-projects list
+  (=project-known-project-roots=, the =project-switch-project= list); blank
+  otherwise.
 - *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving
   a granular default sort.
 - *Description* :: the first sentence of the project's =README.org= (or
@@ -110,6 +118,11 @@ same actions grouped into columns, headed by the project under point.
 
 - =project-overview-search-roots= :: directories scanned for git projects.
   Each root is checked directly and one level deep for =.git= subdirs.
+- =project-overview-include-known-projects= :: when non-nil (the default),
+  also list the projects Emacs already knows about — the same roots
+  =project-switch-project= offers (=project-known-project-roots=) — merged
+  with those found under =project-overview-search-roots=.  These need not
+  be git repositories; non-git projects simply show blank git columns.
 - =project-overview-exclude-regexp= :: project directory names matching this
   regexp are hidden.
 - =project-overview-buffer-name= :: name of the dashboard buffer.
