@@ -38,8 +38,10 @@ A header line shows aggregate status across all projects, e.g.:
  42 projects · 5 dirty · 3 out of sync · 28 open bugs in 9
 #+end_example
 
-The counts cover the full set regardless of any active filter; positive
-counts are highlighted so problem areas stand out at a glance.
+The counts cover the full set regardless of any active filter.
+
+The mode line shows the full (abbreviated) path of the project under
+point, updating as you move between rows.
 
 * Actions
 
@@ -80,8 +82,10 @@ different view of your repositories:
 | =n= | only repos whose name matches a regexp          |
 | =a= | clear the filter (show all again)               |
 
-The active filter and a =shown/total= count appear in the mode line, e.g.
-=[dirty 5/42]=.  Filters are remembered across =g= (refresh), so you can
+While a filter is active it is shown in the header line (=⦅ filter: dirty
+— 5 shown ⦆=) and in the mode line as =[dirty 5/42]=.  The whole header
+line uses the theme's =header-line= face, so it stays readable on any
+theme.  Filters are remembered across =g= (refresh), so you can
 keep, say, the "dirty" view live while you work through it, and clear it
 with =/ a= when done.
 

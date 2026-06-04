@@ -36,6 +36,7 @@
 ;;
 ;; A header line summarises the whole set: total projects, how many are
 ;; dirty, how many are out of sync with upstream, and the open bug count.
+;; The mode line shows the full path of the project under point.
 ;;
 ;; Single keys act on the project under point, reusing project.el where
 ;; possible.  See `project-overview-mode-map' for the full set:
@@ -651,14 +652,18 @@ shown/total counts and redraws."
 ;;; Header line
 
 (defun project-overview--header-count (n label)
-  "Return header-line segment \" · N LABEL\", emphasised when N is positive."
-  (propertize (format " · %d %s" n label)
-              'face (if (> n 0) 'warning 'shadow)))
+  "Return header-line segment \" · N LABEL\", bold when N is positive.
+Bold only sets the weight, so the colour stays that of the surrounding
+`header-line' face."
+  (let ((s (format " · %d %s" n label)))
+    (if (> n 0) (propertize s 'face 'bold) s)))
 
 (defun project-overview--header-line ()
   "Return the aggregate status header-line for the dashboard.
-Counts are taken from the full project set, independent of any active
-filter (which is reported separately in the mode line)."
+The leading counts are taken from the full project set; when a filter
+is active it is appended, with the number of projects it shows.  Only
+weight (bold) is used for emphasis, so the whole line keeps the theme's
+`header-line' colour and stays readable."
   (let* ((cache project-overview--cache)
          (total (length cache))
          (dirty (seq-count #'project-overview--filter-dirty cache))
@@ -673,7 +678,20 @@ filter (which is reported separately in the mode line)."
      (project-overview--header-count
       open (format "open bug%s%s"
                    (if (= open 1) "" "s")
-                   (if (> buggy 0) (format " in %d" buggy) ""))))))
+                   (if (> buggy 0) (format " in %d" buggy) "")))
+     (when project-overview--filter
+       (let ((shown (seq-count (cdr project-overview--filter) cache)))
+         (propertize (format "    ⦅ filter: %s — %d shown ⦆"
+                             (car project-overview--filter) shown)
+                     'face 'bold))))))
+
+(defun project-overview--path-mode-line ()
+  "Return the abbreviated path of the project under point for the mode line."
+  (let ((root (and (derived-mode-p 'project-overview-mode)
+                   (tabulated-list-get-id))))
+    (if root
+        (concat "  " (abbreviate-file-name (directory-file-name root)))
+      "")))
 
 ;;; Mode
 
@@ -724,7 +742,11 @@ filter (which is reported separately in the mode line)."
   ;; (still sortable) column headers at the top of the buffer instead.
   (setq tabulated-list-use-header-line nil)
   (tabulated-list-init-header)
-  (setq header-line-format '(:eval (project-overview--header-line))))
+  (setq header-line-format '(:eval (project-overview--header-line)))
+  ;; Show the full path of the project under point at the end of the mode line.
+  (setq-local mode-line-format
+              (append mode-line-format
+                      '((:eval (project-overview--path-mode-line))))))
 
 ;;;###autoload
 (defun project-overview ()
@@ -735,7 +757,11 @@ filter (which is reported separately in the mode line)."
   (let ((buf (get-buffer-create project-overview-buffer-name)))
     (with-current-buffer buf
       (project-overview-mode)
-      (tabulated-list-print))
+      (tabulated-list-print)
+      ;; Start point on the first project row, past the in-buffer header.
+      (goto-char (point-min))
+      (while (and (not (eobp)) (not (tabulated-list-get-id)))
+        (forward-line 1)))
     (pop-to-buffer-same-window buf))
   (message "Scanning projects…done"))
 
