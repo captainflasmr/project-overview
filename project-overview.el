@@ -35,6 +35,7 @@
 ;;   - the open/total bug count from BUGS.org,
 ;;   - git branch, dirty flag, and ahead/behind state,
 ;;   - the remote forge (github, gitlab, …) or blank for local-only,
+;;   - the remote owner/user (e.g. the GitHub username),
 ;;   - a check mark when the project is on Emacs's known-projects list,
 ;;   - the last commit date, and
 ;;   - a one-line description taken from the project's README.
@@ -293,6 +294,21 @@ host extracted from the URL (handles https://, ssh:// and scp-like
       (match-string 1 url))
      (t ""))))
 
+(defun project-overview--remote-owner (url)
+  "Return the owner/user segment of git remote URL, or \"\" when unknown.
+For e.g. \"git@github.com:alice/repo.git\" or
+\"https://github.com/alice/repo.git\" this returns \"alice\"."
+  (if (or (null url) (string-empty-p url))
+      ""
+    (cond
+     ;; scp-like form: [user@]host:owner/repo
+     ((string-match "\\`\\(?:[^/@]+@\\)?[^/:]+:\\([^/]+\\)/" url)
+      (match-string 1 url))
+     ;; URL form: scheme://[user@]host[:port]/owner/repo
+     ((string-match "://\\(?:[^/@]+@\\)?[^/]+/\\([^/]+\\)/" url)
+      (match-string 1 url))
+     (t ""))))
+
 (defun project-overview--remote-url (root)
   "Return the URL of ROOT's origin remote, or the first remote, else nil."
   (or (project-overview--git root "config" "--get" "remote.origin.url")
@@ -314,14 +330,16 @@ host extracted from the URL (handles https://, ssh:// and scp-like
                      ""))
          (ab (project-overview--git root "rev-list" "--left-right" "--count"
                                     "HEAD...@{u}"))
-         (host (project-overview--remote-host
-                (project-overview--remote-url root)))
+         (url (project-overview--remote-url root))
+         (host (project-overview--remote-host url))
+         (owner (project-overview--remote-owner url))
          ahead behind)
     (when (and ab (string-match "\\([0-9]+\\)[ \t]+\\([0-9]+\\)" ab))
       (setq ahead (string-to-number (match-string 1 ab))
             behind (string-to-number (match-string 2 ab))))
     (list :branch branch :dirty dirty :commit commit
-          :ahead (or ahead 0) :behind (or behind 0) :host host)))
+          :ahead (or ahead 0) :behind (or behind 0)
+          :host host :owner owner)))
 
 (defun project-overview--scan ()
   "Scan all discovered projects and populate `project-overview--cache'."
@@ -372,6 +390,7 @@ host extracted from the URL (handles https://, ssh:// and scp-like
                   (plist-get git :branch)
                   (project-overview--git-flag git)
                   (or (plist-get git :host) "")
+                  (or (plist-get git :owner) "")
                   (if (plist-get p :known) "✓" "")
                   (plist-get git :commit)
                   (propertize (plist-get p :desc) 'face 'shadow)))))
@@ -809,6 +828,7 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
          ("Branch" 14 t)
          ("Git" 6 t)
          ("Remote" 10 t)
+         ("Owner" 16 t)
          ("Known" 6 t)
          ("Commit" 17 t)
          ("Description" 50 t)])

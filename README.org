@@ -11,10 +11,10 @@ projects Emacs already knows about (the =project-switch-project= list) —
 surfacing the kind of status you usually have to dig for:
 
 #+begin_example
-Project                   Version   ChangeLog     Bugs   Branch   Git   Remote   Known   Commit
-ollama-buddy              7.5.3     2026-05-19    2/15   main     *     github   ✓       2026-06-02 14:32
-simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2    github   ✓       2026-05-31 09:18
-bank-buddy                0.3.1     2026-01-16            main          gitlab           2026-01-16 21:05
+Project                   Version   ChangeLog     Bugs   Branch   Git   Remote   Owner           Known   Commit
+ollama-buddy              7.5.3     2026-05-19    2/15   main     *     github   captainflasmr   ✓       2026-06-02 14:32
+simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2    github   captainflasmr   ✓       2026-05-31 09:18
+bank-buddy                0.3.1     2026-01-16            main          gitlab   somegroup               2026-01-16 21:05
 #+end_example
 
 The table opens sorted by =Commit= date/time, most recently committed first.
@@ -30,6 +30,8 @@ The table opens sorted by =Commit= date/time, most recently committed first.
 - *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=,
   =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.
   Blank for repositories with no remote (local only).
+- *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub
+  username or organisation (=alice= for =github.com/alice/repo=).
 - *Known* :: =✓= when the project is on Emacs's known-projects list
   (=project-known-project-roots=, the =project-switch-project= list); blank
   otherwise.

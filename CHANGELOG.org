@@ -9,6 +9,7 @@
 - Mode line shows the full (abbreviated) path of the project under point.
 - ~Description~ column: the first sentence of the project's ~README.org~ or ~README.md~.
 - ~Remote~ column: the forge hosting ~origin~ (~github~, ~gitlab~, ~codeberg~, ~bitbucket~, ~sourcehut~, or the bare host); blank for local-only repos.
+- ~Owner~ column: the owner/user segment of the remote URL (e.g. the GitHub username or organisation).
 - ~Known~ column: ~✓~ when the project is on Emacs's known-projects list.
 - ~project-overview-include-known-projects~ (default on): merge ~project-known-project-roots~ (the ~project-switch-project~ list) into discovery alongside ~project-overview-search-roots~; non-git projects show blank git columns.
 ** Changed
