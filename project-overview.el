@@ -30,18 +30,26 @@
 ;;
 ;;   - the latest CHANGELOG.org version and date,
 ;;   - the open/total bug count from BUGS.org,
-;;   - git branch, dirty flag, and ahead/behind state, and
-;;   - the last commit date.
+;;   - git branch, dirty flag, and ahead/behind state,
+;;   - the last commit date, and
+;;   - a one-line description taken from the project's README.
 ;;
 ;; Single keys act on the project under point, reusing project.el where
 ;; possible.  See `project-overview-mode-map' for the full set:
 ;;
+;; Keys mirroring the `project-switch-project' menu act on the project
+;; under point:
+;;
 ;;   RET / o  switch to project        c  open CHANGELOG.org
-;;   f        find file in project     v  preview latest CHANGELOG entry
-;;   m        magit-status             b  open BUGS.org
-;;   s        search project           B  TODO agenda for this project's bugs
-;;   d        dired at root            g  refresh (re-scan)
-;;   !        shell at root            ?  transient menu of all actions
+;;   f        find file                V  preview latest CHANGELOG entry
+;;   g        find regexp              b  open BUGS.org (window right)
+;;   d        find directory           B  TODO agenda for this project's bugs
+;;   e        eshell                   A  TODO agenda for all projects' bugs
+;;   s        search (ripgrep)         G  refresh (re-scan)
+;;   v        vc-dir                   ?  transient menu of all actions
+;;   m        magit-status
+;;   D        dired at root
+;;   !        shell at root
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
@@ -67,6 +75,9 @@
 (declare-function org-todo-list "org-agenda" (&optional arg))
 (declare-function org-mode "org" ())
 (defvar org-agenda-files)
+(defvar org-agenda-prefix-format)
+(defvar org-agenda-sticky)
+(defvar project-current-directory-override)
 
 ;;; Customization
 
@@ -161,6 +172,52 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
             (setq open (1+ open))))))
     (cons open total)))
 
+(defun project-overview--prose-line-p (line)
+  "Non-nil if LINE looks like README prose rather than markup."
+  (not (or (string-empty-p line)
+           (string-prefix-p "#" line)    ; org keyword / md heading
+           (string-prefix-p "*" line)    ; org heading
+           (string-prefix-p "|" line)    ; table
+           (string-prefix-p ">" line)    ; block quote
+           (string-prefix-p "-" line)    ; list item / horizontal rule
+           (string-prefix-p ":" line)))) ; org drawer / property
+
+(defun project-overview--clean-text (s)
+  "Strip light org/markdown inline markup from S and collapse whitespace."
+  (string-trim
+   (replace-regexp-in-string
+    "[ \t\n]+" " " (replace-regexp-in-string "[=~*/`_]" "" s))))
+
+(defun project-overview--description (root)
+  "Return a one-line description for ROOT taken from its README.
+Reads the first prose paragraph of README.org or README.md, collapses
+it to a single line, and trims it to the first sentence.  Returns an
+empty string when no README or prose is found."
+  (let ((readme (seq-find #'file-readable-p
+                          (list (expand-file-name "README.org" root)
+                                (expand-file-name "README.md" root)
+                                (expand-file-name "readme.org" root)))))
+    (if (not readme)
+        ""
+      (with-temp-buffer
+        (insert-file-contents readme nil 0 4000)
+        (goto-char (point-min))
+        (let (para)
+          (catch 'done
+            (while (not (eobp))
+              (let ((line (string-trim
+                           (buffer-substring (line-beginning-position)
+                                             (line-end-position)))))
+                (cond
+                 ((project-overview--prose-line-p line) (push line para))
+                 (para (throw 'done nil))))
+              (forward-line 1)))
+          (let ((text (project-overview--clean-text
+                       (mapconcat #'identity (nreverse para) " "))))
+            (if (string-match "\\`\\(.+?[.!?]\\)\\(?:[ \t]\\|\\'\\)" text)
+                (match-string 1 text)
+              text)))))))
+
 (defun project-overview--git-info (root)
   "Return a plist :branch :dirty :commit :ahead :behind describing ROOT's git."
   (let* ((branch (or (project-overview--git root "symbolic-ref" "--short" "HEAD")
@@ -194,6 +251,7 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
                          :changed (or (cdr cl) "")
                          :open (car bugs)
                          :total (cdr bugs)
+                         :desc (project-overview--description root)
                          :git git))))
          (project-overview--discover))))
 
@@ -227,7 +285,8 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
                      bugs
                      (plist-get git :branch)
                      (project-overview--git-flag git)
-                     (plist-get git :commit)))))
+                     (plist-get git :commit)
+                     (propertize (plist-get p :desc) 'face 'shadow)))))
    project-overview--cache))
 
 ;;; Actions
@@ -272,6 +331,37 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
   (let ((default-directory (project-overview--root)))
     (if (fboundp 'project-shell) (project-shell) (shell))))
 
+;; The following commands mirror the entries on the `project-switch-project'
+;; menu, applied to the project under point.  Each runs the standard
+;; project.el command with the project context bound to that root.
+
+(defun project-overview--run-project-command (command)
+  "Call COMMAND with the project context set to the project under point."
+  (let* ((root (project-overview--root))
+         (default-directory root)
+         (project-current-directory-override root))
+    (call-interactively command)))
+
+(defun project-overview-find-regexp ()
+  "Run `project-find-regexp' in the project under point."
+  (interactive)
+  (project-overview--run-project-command #'project-find-regexp))
+
+(defun project-overview-find-dir ()
+  "Run `project-find-dir' in the project under point."
+  (interactive)
+  (project-overview--run-project-command #'project-find-dir))
+
+(defun project-overview-vc-dir ()
+  "Run `project-vc-dir' in the project under point."
+  (interactive)
+  (project-overview--run-project-command #'project-vc-dir))
+
+(defun project-overview-eshell ()
+  "Run `project-eshell' in the project under point."
+  (interactive)
+  (project-overview--run-project-command #'project-eshell))
+
 (defun project-overview-changelog ()
   "Visit CHANGELOG.org of the project under point."
   (interactive)
@@ -280,19 +370,114 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
       (user-error "No CHANGELOG.org in this project"))))
 
 (defun project-overview-bugs-file ()
-  "Visit BUGS.org of the project under point."
+  "Visit BUGS.org of the project under point in a window to the right."
   (interactive)
   (let ((f (expand-file-name "BUGS.org" (project-overview--root))))
-    (if (file-exists-p f) (find-file f)
-      (user-error "No BUGS.org in this project"))))
+    (unless (file-exists-p f) (user-error "No BUGS.org in this project"))
+    (select-window
+     (display-buffer (find-file-noselect f)
+                     '(display-buffer-in-direction (direction . right))))))
+
+;;; Bugs agenda (single project and all projects)
+
+(defun project-overview--bugs-files ()
+  "Return the BUGS.org files of every discovered project, sorted."
+  (let (files)
+    (dolist (root (project-overview--discover))
+      (let ((f (expand-file-name "BUGS.org" root)))
+        (when (file-exists-p f)
+          (push f files))))
+    (sort files #'string<)))
+
+(defun project-overview--bugs-category (orig-fun &optional pos force-refresh)
+  "Advise `org-get-category' (ORIG-FUN) for BUGS.org files.
+Use the parent directory name as the category instead of the default
+\"BUGS\" so every entry shows its project.
+POS and FORCE-REFRESH are passed through unchanged."
+  (let ((cat (funcall orig-fun pos force-refresh)))
+    (if (and (equal cat "BUGS")
+             (buffer-file-name)
+             (string-suffix-p "/BUGS.org" (buffer-file-name)))
+        (file-name-nondirectory
+         (directory-file-name
+          (file-name-directory (buffer-file-name))))
+      cat)))
+
+(advice-add 'org-get-category :around #'project-overview--bugs-category)
+
+(defvar project-overview--bugs-agenda-files nil
+  "BUGS.org files backing the most recent bugs agenda.
+Set by `project-overview--bugs-agenda' so that `org-agenda-redo'
+re-runs against the same files instead of the global
+`org-agenda-files'.")
+
+(defvar project-overview--bugs-agenda-prefix-format nil
+  "Prefix format for the most recent bugs agenda.
+Set by `project-overview--bugs-agenda' so that redo preserves the
+column alignment between project, tags, and TODO headline.")
+
+(defun project-overview--around-org-agenda-redo (orig-fun &rest args)
+  "Wrap `org-agenda-redo' (ORIG-FUN) to keep the bugs agenda scope.
+Without this advice, re-running the TODO agenda after a
+`project-overview' bugs command would fall back to the global
+`org-agenda-files' and default prefix, losing the BUGS.org scope and
+column alignment.  ARGS are forwarded to ORIG-FUN."
+  (if project-overview--bugs-agenda-files
+      (let ((org-agenda-files project-overview--bugs-agenda-files)
+            (org-agenda-prefix-format project-overview--bugs-agenda-prefix-format))
+        (apply orig-fun args))
+    (apply orig-fun args)))
+
+(advice-add 'org-agenda-redo :around #'project-overview--around-org-agenda-redo)
+
+(defun project-overview--bugs-agenda-exit ()
+  "Clear the saved bugs agenda state on agenda exit."
+  (setq project-overview--bugs-agenda-files nil
+        project-overview--bugs-agenda-prefix-format nil))
+
+(add-hook 'org-agenda-exit-hook #'project-overview--bugs-agenda-exit)
+
+(defun project-overview--bugs-agenda (files)
+  "Show a TODO agenda over FILES, categorised by project.
+Records FILES and the column-aligned prefix format so that redo
+commands (such as \"g\") keep the same scope rather than reverting to
+the global `org-agenda-files'."
+  (let* ((fmt (if (listp org-agenda-prefix-format)
+                  org-agenda-prefix-format
+                (default-value 'org-agenda-prefix-format)))
+         (bugs-prefix
+          (mapcar (lambda (item)
+                    (if (eq (car item) 'todo)
+                        (cons 'todo " %i %-20:c %-10t %s")
+                      item))
+                  fmt)))
+    (setq project-overview--bugs-agenda-files files
+          project-overview--bugs-agenda-prefix-format bugs-prefix)
+    (let ((org-agenda-files files)
+          (org-agenda-prefix-format bugs-prefix)
+          ;; Force regeneration: with `org-agenda-sticky' enabled, both
+          ;; commands map to the same TODO agenda buffer and the second
+          ;; call would reuse the first call's contents instead of
+          ;; rescanning the new file set.
+          (org-agenda-sticky nil))
+      (org-todo-list))))
 
 (defun project-overview-bugs-agenda ()
   "Show a TODO agenda scoped to the BUGS.org of the project under point."
   (interactive)
   (let ((f (expand-file-name "BUGS.org" (project-overview--root))))
     (unless (file-exists-p f) (user-error "No BUGS.org in this project"))
-    (let ((org-agenda-files (list f)))
-      (org-todo-list))))
+    (project-overview--bugs-agenda (list f))))
+
+;;;###autoload
+(defun project-overview-bugs-agenda-all ()
+  "Show a single TODO agenda for the BUGS.org of every discovered project.
+Each entry is prefixed with its project directory name, and redo
+commands (such as \"g\") keep the same BUGS.org scope and alignment."
+  (interactive)
+  (let ((files (project-overview--bugs-files)))
+    (unless files (user-error "No BUGS.org files found in any project"))
+    (project-overview--bugs-agenda files)))
 
 (defun project-overview-changelog-preview ()
   "Preview the latest CHANGELOG.org entry for the project under point.
@@ -319,6 +504,7 @@ The entry is shown read-only in a right-hand side window."
           (insert (or text "No entries"))
           (goto-char (point-min))
           (delay-mode-hooks (org-mode))
+          (visual-line-mode 1)
           (view-mode 1)))
       (display-buffer buf '(display-buffer-in-side-window
                             (side . right) (window-width . 0.4))))))
@@ -344,21 +530,26 @@ The entry is shown read-only in a right-hand side window."
   "Act on the project under point in the `project-overview' dashboard."
   [:description
    (lambda () (concat "Project: " (or (project-overview--menu-name) "(none)")))
-   ["Open"
+   ["Find"
     ("o" "switch to project" project-overview-open)
     ("f" "find file"         project-overview-find-file)
-    ("d" "dired"             project-overview-dired)
+    ("g" "find regexp"       project-overview-find-regexp)
+    ("d" "find directory"    project-overview-find-dir)
+    ("e" "eshell"            project-overview-eshell)
+    ("D" "dired"             project-overview-dired)
     ("!" "shell"             project-overview-shell)]
    ["Inspect"
     ("c" "CHANGELOG.org"     project-overview-changelog)
-    ("v" "preview changelog" project-overview-changelog-preview)
+    ("V" "preview changelog" project-overview-changelog-preview)
     ("b" "BUGS.org"          project-overview-bugs-file)
-    ("B" "bugs agenda"       project-overview-bugs-agenda)]
+    ("B" "bugs agenda"       project-overview-bugs-agenda)
+    ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)]
    ["VC & search"
+    ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
     ("s" "search"            project-overview-search)]]
   ["Dashboard"
-   ("g" "refresh" project-overview-refresh :transient t)
+   ("G" "refresh" project-overview-refresh :transient t)
    ("q" "quit"    transient-quit-one)])
 
 ;;; Mode
@@ -367,16 +558,24 @@ The entry is shown read-only in a right-hand side window."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'project-overview-open)
     (define-key map "o" #'project-overview-open)
+    ;; Project actions mirroring the `project-switch-project' menu.
     (define-key map "f" #'project-overview-find-file)
-    (define-key map "m" #'project-overview-magit)
+    (define-key map "g" #'project-overview-find-regexp)
+    (define-key map "d" #'project-overview-find-dir)
+    (define-key map "v" #'project-overview-vc-dir)
+    (define-key map "e" #'project-overview-eshell)
     (define-key map "s" #'project-overview-search)
-    (define-key map "d" #'project-overview-dired)
+    (define-key map "m" #'project-overview-magit)
+    (define-key map "D" #'project-overview-dired)
     (define-key map "!" #'project-overview-shell)
+    ;; Inspect.
     (define-key map "c" #'project-overview-changelog)
-    (define-key map "v" #'project-overview-changelog-preview)
+    (define-key map "V" #'project-overview-changelog-preview)
     (define-key map "b" #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
-    (define-key map "g" #'project-overview-refresh)
+    (define-key map "A" #'project-overview-bugs-agenda-all)
+    ;; Dashboard.
+    (define-key map "G" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
   "Keymap for `project-overview-mode'.")
@@ -392,7 +591,8 @@ The entry is shown read-only in a right-hand side window."
          ("Bugs" 7 t)
          ("Branch" 14 t)
          ("Git" 6 t)
-         ("Commit" 12 t)])
+         ("Commit" 12 t)
+         ("Description" 50 t)])
   (setq tabulated-list-sort-key '("Project" . nil))
   (setq tabulated-list-entries #'project-overview--entries)
   (tabulated-list-init-header))

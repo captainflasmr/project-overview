@@ -24,26 +24,34 @@ simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2     2026-
 - *Branch / Git* :: current branch, =*= when the worktree is dirty, and
   =↑n=/=↓n= for commits ahead of / behind the upstream.
 - *Commit* :: date of the last commit.
+- *Description* :: the first sentence of the project's =README.org= (or
+  =README.md=), collapsed to a single line.
 
 Click a column header (or press =S=) to sort by it.
 
 * Actions
 
-Single keys act on the project under point:
+Single keys act on the project under point.  The =project.el= actions use
+the same keys as the =project-switch-project= menu:
 
 | Key       | Action                                       |
 |-----------+----------------------------------------------|
 | =RET= / =o= | switch to project (=project-switch-project=) |
-| =f=         | find file in project                         |
-| =m=         | =magit-status=                               |
+| =f=         | find file (=project-find-file=)              |
+| =g=         | find regexp (=project-find-regexp=)          |
+| =d=         | find directory (=project-find-dir=)          |
+| =v=         | =project-vc-dir=                             |
+| =e=         | =project-eshell=                            |
 | =s=         | search (=consult-ripgrep=, else project grep)|
-| =d=         | dired at root                                |
+| =m=         | =magit-status=                               |
+| =D=         | dired at root                                |
 | =!=         | shell at root                                |
 | =c=         | open =CHANGELOG.org=                          |
-| =v=         | preview latest =CHANGELOG.org= entry          |
-| =b=         | open =BUGS.org=                               |
+| =V=         | preview latest =CHANGELOG.org= entry          |
+| =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs    |
-| =g=         | refresh (re-scan)                            |
+| =A=         | TODO agenda for every project's bugs         |
+| =G=         | refresh (re-scan)                            |
 | =?=         | transient menu of all the above              |
 
 Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
