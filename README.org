@@ -38,7 +38,7 @@ the same keys as the =project-switch-project= menu:
 |-----------+----------------------------------------------|
 | =RET= / =o= | switch to project (=project-switch-project=) |
 | =f=         | find file (=project-find-file=)              |
-| =g=         | find regexp (=project-find-regexp=)          |
+| =G=         | find regexp (=project-find-regexp=)          |
 | =d=         | find directory (=project-find-dir=)          |
 | =v=         | =project-vc-dir=                             |
 | =e=         | =project-eshell=                            |
@@ -51,8 +51,27 @@ the same keys as the =project-switch-project= menu:
 | =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs    |
 | =A=         | TODO agenda for every project's bugs         |
-| =G=         | refresh (re-scan)                            |
+| =/=         | filter the view (transient)                  |
+| =g=         | refresh (re-scan)                            |
 | =?=         | transient menu of all the above              |
+
+* Filtering
+
+Press =/= (=project-overview-filter-dispatch=) to narrow the table to a
+different view of your repositories:
+
+| Key | View                                            |
+|-----+-------------------------------------------------|
+| =d= | only repos with uncommitted changes             |
+| =b= | only repos with open =BUGS.org= entries          |
+| =u= | only repos ahead of / behind their upstream     |
+| =n= | only repos whose name matches a regexp          |
+| =a= | clear the filter (show all again)               |
+
+The active filter and a =shown/total= count appear in the mode line, e.g.
+=[dirty 5/42]=.  Filters are remembered across =g= (refresh), so you can
+keep, say, the "dirty" view live while you work through it, and clear it
+with =/ a= when done.
 
 Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
 same actions grouped into columns, headed by the project under point.

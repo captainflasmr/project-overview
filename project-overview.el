@@ -42,14 +42,19 @@
 ;;
 ;;   RET / o  switch to project        c  preview latest CHANGELOG entry
 ;;   f        find file                C  open CHANGELOG.org (window right)
-;;   g        find regexp              b  open BUGS.org (window right)
+;;   G        find regexp              b  open BUGS.org (window right)
 ;;   d        find directory           B  TODO agenda for this project's bugs
 ;;   e        eshell                   A  TODO agenda for all projects' bugs
-;;   s        search (ripgrep)         G  refresh (re-scan)
-;;   v        vc-dir                   ?  transient menu of all actions
-;;   m        magit-status
+;;   s        search (ripgrep)         /  filter the view (transient)
+;;   v        vc-dir                   g  refresh (re-scan)
+;;   m        magit-status             ?  transient menu of all actions
 ;;   D        dired at root
 ;;   !        shell at root
+;;
+;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
+;; dirty repos, repos with open bugs, repos out of sync with upstream, or
+;; a name regexp.  The active filter and shown/total count appear in the
+;; mode line, and survive a refresh until cleared with `/ a'.
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
@@ -107,6 +112,12 @@ Each root is checked directly and one level deep for .git subdirs."
 
 (defvar project-overview--cache nil
   "Alist of (ROOT . PLIST) holding scanned project data for the dashboard.")
+
+(defvar-local project-overview--filter nil
+  "Active dashboard filter, or nil to show every project.
+When set, a cons (LABEL . PREDICATE): PREDICATE receives a
+\(ROOT . PLIST) cache cell and returns non-nil to keep that project;
+LABEL is a short string shown in the mode line.")
 
 ;;; Scanning
 
@@ -267,27 +278,32 @@ empty string when no README or prose is found."
       (setq s (concat s (format "↓%d" (plist-get git :behind)))))
     (if (string-empty-p s) "" (propertize s 'face 'warning))))
 
+(defun project-overview--entry (cell)
+  "Build a `tabulated-list-entries' row from cache CELL."
+  (let* ((root (car cell))
+         (p (cdr cell))
+         (git (plist-get p :git))
+         (open (plist-get p :open))
+         (total (plist-get p :total))
+         (bugs (if (> total 0) (format "%d/%d" open total) "")))
+    (when (> open 0) (setq bugs (propertize bugs 'face 'warning)))
+    (list root
+          (vector (plist-get p :name)
+                  (plist-get p :version)
+                  (plist-get p :changed)
+                  bugs
+                  (plist-get git :branch)
+                  (project-overview--git-flag git)
+                  (plist-get git :commit)
+                  (propertize (plist-get p :desc) 'face 'shadow)))))
+
 (defun project-overview--entries ()
-  "Build `tabulated-list-entries' from `project-overview--cache'."
-  (mapcar
-   (lambda (cell)
-     (let* ((root (car cell))
-            (p (cdr cell))
-            (git (plist-get p :git))
-            (open (plist-get p :open))
-            (total (plist-get p :total))
-            (bugs (if (> total 0) (format "%d/%d" open total) "")))
-       (when (> open 0) (setq bugs (propertize bugs 'face 'warning)))
-       (list root
-             (vector (plist-get p :name)
-                     (plist-get p :version)
-                     (plist-get p :changed)
-                     bugs
-                     (plist-get git :branch)
-                     (project-overview--git-flag git)
-                     (plist-get git :commit)
-                     (propertize (plist-get p :desc) 'face 'shadow)))))
-   project-overview--cache))
+  "Build `tabulated-list-entries', honouring the active filter."
+  (mapcar #'project-overview--entry
+          (if project-overview--filter
+              (seq-filter (cdr project-overview--filter)
+                          project-overview--cache)
+            project-overview--cache)))
 
 ;;; Actions
 
@@ -520,6 +536,68 @@ The entry is shown read-only in a right-hand side window."
     (tabulated-list-print t))
   (message "Scanning projects…done"))
 
+;;; Filtering
+
+(defun project-overview--filter-dirty (cell)
+  "Keep CELL when its worktree has uncommitted changes."
+  (plist-get (plist-get (cdr cell) :git) :dirty))
+
+(defun project-overview--filter-bugs (cell)
+  "Keep CELL when it has open (non-DONE) BUGS.org entries."
+  (> (plist-get (cdr cell) :open) 0))
+
+(defun project-overview--filter-out-of-sync (cell)
+  "Keep CELL when it is ahead of or behind its upstream."
+  (let ((git (plist-get (cdr cell) :git)))
+    (or (> (plist-get git :ahead) 0)
+        (> (plist-get git :behind) 0))))
+
+(defun project-overview--apply-filter (label predicate)
+  "Filter the dashboard to projects matching PREDICATE, described by LABEL.
+A nil PREDICATE clears the filter.  Updates the mode line with the
+shown/total counts and redraws."
+  (setq project-overview--filter (and predicate (cons label predicate)))
+  (let* ((total (length project-overview--cache))
+         (shown (if predicate
+                    (seq-count predicate project-overview--cache)
+                  total)))
+    (setq-local mode-line-process
+                (and predicate (format " [%s %d/%d]" label shown total)))
+    (force-mode-line-update)
+    (when (derived-mode-p 'project-overview-mode)
+      (tabulated-list-print t))
+    (message "Filter: %s — %d/%d project%s"
+             label shown total (if (= shown 1) "" "s"))))
+
+(defun project-overview-filter-dirty ()
+  "Show only projects with uncommitted changes."
+  (interactive)
+  (project-overview--apply-filter "dirty" #'project-overview--filter-dirty))
+
+(defun project-overview-filter-bugs ()
+  "Show only projects with open BUGS.org entries."
+  (interactive)
+  (project-overview--apply-filter "open bugs" #'project-overview--filter-bugs))
+
+(defun project-overview-filter-out-of-sync ()
+  "Show only projects ahead of or behind their upstream."
+  (interactive)
+  (project-overview--apply-filter "out of sync"
+                                  #'project-overview--filter-out-of-sync))
+
+(defun project-overview-filter-name (regexp)
+  "Show only projects whose name matches REGEXP."
+  (interactive (list (read-regexp "Filter projects by name (regexp): ")))
+  (project-overview--apply-filter
+   (format "name~%s" regexp)
+   (lambda (cell)
+     (string-match-p regexp (plist-get (cdr cell) :name)))))
+
+(defun project-overview-filter-clear ()
+  "Clear any active filter and show every project."
+  (interactive)
+  (project-overview--apply-filter "all" nil))
+
 ;;; Transient
 
 (defun project-overview--menu-name ()
@@ -535,7 +613,7 @@ The entry is shown read-only in a right-hand side window."
    ["Find"
     ("o" "switch to project" project-overview-open)
     ("f" "find file"         project-overview-find-file)
-    ("g" "find regexp"       project-overview-find-regexp)
+    ("G" "find regexp"       project-overview-find-regexp)
     ("d" "find directory"    project-overview-find-dir)
     ("e" "eshell"            project-overview-eshell)
     ("D" "dired"             project-overview-dired)
@@ -551,8 +629,21 @@ The entry is shown read-only in a right-hand side window."
     ("m" "magit-status"      project-overview-magit)
     ("s" "search"            project-overview-search)]]
   ["Dashboard"
-   ("G" "refresh" project-overview-refresh :transient t)
+   ("/" "filter…" project-overview-filter-dispatch)
+   ("g" "refresh" project-overview-refresh :transient t)
    ("q" "quit"    transient-quit-one)])
+
+;;;###autoload (autoload 'project-overview-filter-dispatch "project-overview" nil t)
+(transient-define-prefix project-overview-filter-dispatch ()
+  "Filter the `project-overview' dashboard to a subset of projects."
+  ["Show only projects that are…"
+   ("d" "dirty (uncommitted changes)" project-overview-filter-dirty)
+   ("b" "with open bugs"              project-overview-filter-bugs)
+   ("u" "out of sync (ahead/behind)"  project-overview-filter-out-of-sync)
+   ("n" "matching a name regexp…"     project-overview-filter-name)]
+  ["Filter"
+   ("a" "all (clear filter)"          project-overview-filter-clear)
+   ("q" "quit"                        transient-quit-one)])
 
 ;;; Mode
 
@@ -562,7 +653,7 @@ The entry is shown read-only in a right-hand side window."
     (define-key map "o" #'project-overview-open)
     ;; Project actions mirroring the `project-switch-project' menu.
     (define-key map "f" #'project-overview-find-file)
-    (define-key map "g" #'project-overview-find-regexp)
+    (define-key map "G" #'project-overview-find-regexp)
     (define-key map "d" #'project-overview-find-dir)
     (define-key map "v" #'project-overview-vc-dir)
     (define-key map "e" #'project-overview-eshell)
@@ -577,7 +668,8 @@ The entry is shown read-only in a right-hand side window."
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
     ;; Dashboard.
-    (define-key map "G" #'project-overview-refresh)
+    (define-key map "/" #'project-overview-filter-dispatch)
+    (define-key map "g" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
   "Keymap for `project-overview-mode'.")
