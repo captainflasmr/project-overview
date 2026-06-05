@@ -1,5 +1,14 @@
 #+TITLE: Changelog for project-overview
 
+* [0.3.0] - 2026-06-05
+** Added
+- ~Path~ column: the project's root directory (abbreviated, e.g. ~~/source/repos/foo~).
+- Selectable column layouts (views): ~V~ (~project-overview-view-dispatch~) switches between ~full~ (every column), ~minimal~, ~status~ (branch/git/bugs), and ~remote~ (forge/owner).  Layouts are defined in ~project-overview-views~ and the opening layout in ~project-overview-default-view~.
+- The view chosen with ~V~ is remembered across sessions via ~savehist~ (~project-overview-saved-view~), taking precedence over ~project-overview-default-view~; toggle with ~project-overview-remember-view~.
+** Changed
+- Columns are now data-driven (~project-overview--columns~): the active view selects which appear and in what order, keeping the header and rows in sync.
+- The ~?~ dispatch now lays the ~Dashboard~ group on the same row as ~Find~, ~Inspect~, and ~VC & search~; ~V~ (view) was added to it.
+
 * [0.2.0] - 2026-06-04
 ** Added
 - Combined bugs agenda: ~project-overview-bugs-agenda-all~ (~A~) gathers every discovered project's ~BUGS.org~ into a single TODO agenda, each entry categorised by its project; redo (~g~) keeps the same file scope and column alignment.

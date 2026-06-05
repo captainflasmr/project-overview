@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.2.0
-;; Package-Version: 0.2.0
+;; Version: 0.3.0
+;; Package-Version: 0.3.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -37,8 +37,9 @@
 ;;   - the remote forge (github, gitlab, …) or blank for local-only,
 ;;   - the remote owner/user (e.g. the GitHub username),
 ;;   - a check mark when the project is on Emacs's known-projects list,
-;;   - the last commit date, and
-;;   - a one-line description taken from the project's README.
+;;   - the last commit date,
+;;   - a one-line description taken from the project's README, and
+;;   - the project's root path.
 ;;
 ;; A header line summarises the whole set: total projects, how many are
 ;; dirty, how many are out of sync with upstream, and the open bug count.
@@ -58,7 +59,7 @@
 ;;   s        search (ripgrep)         /  filter the view (transient)
 ;;   v        vc-dir                   g  refresh (re-scan)
 ;;   m        magit-status             ?  transient menu of all actions
-;;   D        dired at root
+;;   D        dired at root            V  switch column layout (transient)
 ;;   !        shell at root
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
@@ -68,6 +69,14 @@
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
+;;
+;; `V' (`project-overview-view-dispatch') switches the column layout
+;; between the named views in `project-overview-views': `full' (every
+;; column), `minimal', `status' (branch/git/bugs), and `remote'
+;; (forge/owner).  The opening layout is `project-overview-default-view';
+;; unless `project-overview-remember-view' is nil, the last view chosen
+;; with `V' is remembered via `savehist' and reused as the opening
+;; layout in the next session.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -94,6 +103,7 @@
 (defvar org-agenda-prefix-format)
 (defvar org-agenda-sticky)
 (defvar project-current-directory-override)
+(defvar savehist-additional-variables)
 
 ;;; Customization
 
@@ -127,6 +137,36 @@ under `project-overview-search-roots'."
   :type 'string
   :group 'project-overview)
 
+(defcustom project-overview-views
+  '((full    . (name version changelog bugs branch git remote owner known commit
+                     description path))
+    (minimal . (name version bugs commit path))
+    (status  . (name bugs branch git commit))
+    (remote  . (name remote owner known path)))
+  "Named column layouts for the dashboard.
+Each entry is (NAME . COLUMNS) where COLUMNS is a list of column ids
+drawn from `project-overview--columns'.  `project-overview-set-view'
+and the view transient switch between them; `full' lists every column."
+  :type '(alist :key-type symbol :value-type (repeat symbol))
+  :group 'project-overview)
+
+(defcustom project-overview-default-view 'full
+  "Column layout used when the dashboard first opens.
+Must be a key of `project-overview-views'.  When
+`project-overview-remember-view' is non-nil, a view chosen with
+`project-overview-set-view' is remembered in
+`project-overview-state-file' and takes precedence over this value."
+  :type 'symbol
+  :group 'project-overview)
+
+(defcustom project-overview-remember-view t
+  "When non-nil, remember the last view chosen with `project-overview-set-view'.
+The choice is stored in `project-overview-saved-view', which is
+registered with `savehist' so it persists across sessions and becomes
+the opening layout next time."
+  :type 'boolean
+  :group 'project-overview)
+
 ;;; Internal state
 
 (defvar project-overview--cache nil
@@ -137,6 +177,11 @@ under `project-overview-search-roots'."
 When set, a cons (LABEL . PREDICATE): PREDICATE receives a
 \(ROOT . PLIST) cache cell and returns non-nil to keep that project;
 LABEL is a short string shown in the mode line.")
+
+(defvar-local project-overview--view nil
+  "Symbol naming the active column layout, or nil for the default.
+Resolved against `project-overview-views', falling back to
+`project-overview-default-view' then `full'.")
 
 ;;; Scanning
 
@@ -373,27 +418,90 @@ For e.g. \"git@github.com:alice/repo.git\" or
       (setq s (concat s (format "↓%d" (plist-get git :behind)))))
     (if (string-empty-p s) "" (propertize s 'face 'warning))))
 
-(defun project-overview--entry (cell)
-  "Build a `tabulated-list-entries' row from cache CELL."
-  (let* ((root (car cell))
-         (p (cdr cell))
-         (git (plist-get p :git))
+(defun project-overview--col-bugs (cell)
+  "Return the propertized open/total bug count for cache CELL."
+  (let* ((p (cdr cell))
          (open (plist-get p :open))
          (total (plist-get p :total))
          (bugs (if (> total 0) (format "%d/%d" open total) "")))
-    (when (> open 0) (setq bugs (propertize bugs 'face 'warning)))
-    (list root
-          (vector (plist-get p :name)
-                  (plist-get p :version)
-                  (plist-get p :changed)
-                  bugs
-                  (plist-get git :branch)
-                  (project-overview--git-flag git)
-                  (or (plist-get git :host) "")
-                  (or (plist-get git :owner) "")
-                  (if (plist-get p :known) "✓" "")
-                  (plist-get git :commit)
-                  (propertize (plist-get p :desc) 'face 'shadow)))))
+    (if (> open 0) (propertize bugs 'face 'warning) bugs)))
+
+(defvar project-overview--columns
+  (list
+   (list 'name        '("Project" 24 t)
+         (lambda (c) (plist-get (cdr c) :name)))
+   (list 'version     '("Version" 9 t)
+         (lambda (c) (plist-get (cdr c) :version)))
+   (list 'changelog   '("ChangeLog" 12 t)
+         (lambda (c) (plist-get (cdr c) :changed)))
+   (list 'bugs        '("Bugs" 7 t)
+         #'project-overview--col-bugs)
+   (list 'branch      '("Branch" 14 t)
+         (lambda (c) (plist-get (plist-get (cdr c) :git) :branch)))
+   (list 'git         '("Git" 6 t)
+         (lambda (c) (project-overview--git-flag (plist-get (cdr c) :git))))
+   (list 'remote      '("Remote" 10 t)
+         (lambda (c) (or (plist-get (plist-get (cdr c) :git) :host) "")))
+   (list 'owner       '("Owner" 16 t)
+         (lambda (c) (or (plist-get (plist-get (cdr c) :git) :owner) "")))
+   (list 'known       '("Known" 6 t)
+         (lambda (c) (if (plist-get (cdr c) :known) "✓" "")))
+   (list 'commit      '("Commit" 17 t)
+         (lambda (c) (plist-get (plist-get (cdr c) :git) :commit)))
+   (list 'description '("Description" 50 t)
+         (lambda (c) (propertize (plist-get (cdr c) :desc) 'face 'shadow)))
+   (list 'path        '("Path" 50 t)
+         (lambda (c) (propertize (abbreviate-file-name (car c)) 'face 'shadow))))
+  "All available dashboard columns.
+Each element is (ID HEADER-SPEC EXTRACTOR): HEADER-SPEC is a
+`tabulated-list-format' triple and EXTRACTOR maps a (ROOT . PLIST)
+cache cell to that column's display string.  `project-overview-views'
+selects which ids appear, in which order.")
+
+(defvar project-overview-saved-view nil
+  "The last view chosen with `project-overview-set-view', or nil.
+Persisted across sessions by `savehist' (see the
+`with-eval-after-load' at the end of this file) and used as the
+opening layout, taking precedence over `project-overview-default-view'.")
+
+(defun project-overview--save-view (view)
+  "Remember VIEW as the persisted opening layout."
+  (setq project-overview-saved-view view))
+
+(defun project-overview--effective-default-view ()
+  "Return the layout to open with, honouring a remembered choice.
+A remembered `project-overview-saved-view' (when
+`project-overview-remember-view' is on and it names a known view)
+takes precedence over `project-overview-default-view'."
+  (or (and project-overview-remember-view
+           project-overview-saved-view
+           (assq project-overview-saved-view project-overview-views)
+           project-overview-saved-view)
+      project-overview-default-view))
+
+(defun project-overview--view-columns ()
+  "Return the list of column ids for the active view.
+Falls back to the effective default view then the `full' layout when
+the current view is unset or unknown."
+  (or (cdr (assq (or project-overview--view
+                     (project-overview--effective-default-view))
+                 project-overview-views))
+      (cdr (assq 'full project-overview-views))
+      (mapcar #'car project-overview--columns)))
+
+(defun project-overview--format ()
+  "Return the `tabulated-list-format' vector for the active view."
+  (vconcat
+   (mapcar (lambda (id) (nth 1 (assq id project-overview--columns)))
+           (project-overview--view-columns))))
+
+(defun project-overview--entry (cell)
+  "Build a `tabulated-list-entries' row from cache CELL for the active view."
+  (list (car cell)
+        (vconcat
+         (mapcar (lambda (id)
+                   (funcall (nth 2 (assq id project-overview--columns)) cell))
+                 (project-overview--view-columns)))))
 
 (defun project-overview--entries ()
   "Build `tabulated-list-entries', honouring the active filter."
@@ -402,6 +510,39 @@ For e.g. \"git@github.com:alice/repo.git\" or
               (seq-filter (cdr project-overview--filter)
                           project-overview--cache)
             project-overview--cache)))
+
+(defun project-overview--apply-view ()
+  "Install the active view's columns into the current dashboard buffer.
+Updates `tabulated-list-format', picks a sort key that the view
+actually contains (preferring Commit), and reinitialises the header."
+  (setq tabulated-list-format (project-overview--format))
+  (let ((headers (mapcar #'car (append tabulated-list-format nil))))
+    (setq tabulated-list-sort-key
+          (if (member "Commit" headers)
+              '("Commit" . t)
+            (cons (car headers) nil))))
+  (tabulated-list-init-header))
+
+(defun project-overview-set-view (view)
+  "Switch the dashboard column layout to VIEW.
+VIEW is a key of `project-overview-views'."
+  (interactive
+   (list (intern
+          (completing-read "View: "
+                           (mapcar (lambda (v) (symbol-name (car v)))
+                                   project-overview-views)
+                           nil t))))
+  (unless (assq view project-overview-views)
+    (user-error "No such view: %s" view))
+  (setq project-overview--view view)
+  ;; Remember the choice for future sessions in our own state file
+  ;; (`custom-file' may be transient, so Customize can't be relied on).
+  (when project-overview-remember-view
+    (project-overview--save-view view))
+  (project-overview--apply-view)
+  (tabulated-list-print t)
+  (message "View: %s%s" view
+           (if project-overview-remember-view " (saved)" "")))
 
 ;;; Actions
 
@@ -725,11 +866,45 @@ shown/total counts and redraws."
    ["VC & search"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
-    ("s" "search"            project-overview-search)]]
-  ["Dashboard"
-   ("/" "filter…" project-overview-filter-dispatch)
-   ("g" "refresh" project-overview-refresh :transient t)
-   ("q" "quit"    transient-quit-one)])
+    ("s" "search"            project-overview-search)]
+   ["Dashboard"
+    ("/" "filter…" project-overview-filter-dispatch)
+    ("V" "view…"   project-overview-view-dispatch)
+    ("g" "refresh" project-overview-refresh :transient t)
+    ("q" "quit"    transient-quit-one)]])
+
+(defun project-overview-view-full ()
+  "Switch to the full layout showing every column."
+  (interactive)
+  (project-overview-set-view 'full))
+
+(defun project-overview-view-minimal ()
+  "Switch to the minimal layout (name, version, bugs, commit, path)."
+  (interactive)
+  (project-overview-set-view 'minimal))
+
+(defun project-overview-view-status ()
+  "Switch to the status layout (name, bugs, branch, git flag, commit)."
+  (interactive)
+  (project-overview-set-view 'status))
+
+(defun project-overview-view-remote ()
+  "Switch to the remote layout (name, remote, owner, known, path)."
+  (interactive)
+  (project-overview-set-view 'remote))
+
+;;;###autoload (autoload 'project-overview-view-dispatch "project-overview" nil t)
+(transient-define-prefix project-overview-view-dispatch ()
+  "Choose a column layout for the `project-overview' dashboard."
+  [:description
+   (lambda () (format "View (now: %s)"
+                      (or project-overview--view
+                          (project-overview--effective-default-view))))
+   [("f" "full"    project-overview-view-full)]
+   [("m" "minimal" project-overview-view-minimal)]
+   [("s" "status"  project-overview-view-status)]
+   [("r" "remote"  project-overview-view-remote)]
+   [("q" "quit"    transient-quit-one)]])
 
 ;;;###autoload (autoload 'project-overview-filter-dispatch "project-overview" nil t)
 (transient-define-prefix project-overview-filter-dispatch ()
@@ -811,6 +986,7 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
     (define-key map "A" #'project-overview-bugs-agenda-all)
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
+    (define-key map "V" #'project-overview-view-dispatch)
     (define-key map "g" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
@@ -820,25 +996,14 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
   "Major mode for the project dashboard.
 
 \\{project-overview-mode-map}"
-  (setq tabulated-list-format
-        [("Project" 24 t)
-         ("Version" 9 t)
-         ("ChangeLog" 12 t)
-         ("Bugs" 7 t)
-         ("Branch" 14 t)
-         ("Git" 6 t)
-         ("Remote" 10 t)
-         ("Owner" 16 t)
-         ("Known" 6 t)
-         ("Commit" 17 t)
-         ("Description" 50 t)])
-  ;; Most recently committed projects first.
-  (setq tabulated-list-sort-key '("Commit" . t))
   (setq tabulated-list-entries #'project-overview--entries)
   ;; Free the window header line for the aggregate summary by printing the
   ;; (still sortable) column headers at the top of the buffer instead.
   (setq tabulated-list-use-header-line nil)
-  (tabulated-list-init-header)
+  ;; Install the columns for the active view (default
+  ;; `project-overview-default-view'), which also sets the sort key —
+  ;; most recently committed projects first when the Commit column is shown.
+  (project-overview--apply-view)
   (setq header-line-format '(:eval (project-overview--header-line)))
   ;; Show the full path of the project under point at the end of the mode line.
   (setq-local mode-line-format
@@ -861,6 +1026,13 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
         (forward-line 1)))
     (pop-to-buffer-same-window buf))
   (message "Scanning projects…done"))
+
+;;; Persistence
+
+;; Persist the remembered view across sessions via `savehist'.  This is
+;; deliberately not tied to `custom-file', which may be transient.
+(with-eval-after-load 'savehist
+  (add-to-list 'savehist-additional-variables 'project-overview-saved-view))
 
 (provide 'project-overview)
 ;;; project-overview.el ends here
