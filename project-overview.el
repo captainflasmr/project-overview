@@ -43,10 +43,11 @@
 ;;   - a one-line description taken from the project's README, and
 ;;   - the project's root path.
 ;;
-;; A header line summarises the whole set: total projects, how many are
-;; dirty, how many are out of sync with upstream, the open bug count,
-;; — across the repos owned by `project-overview-github-user' — the total
-;; open GitHub issues and pull requests, and the active view.
+;; A compact header line summarises the whole set, leading with the
+;; active view: total projects, then — omitting any that are zero — how
+;; many are dirty, out of sync with upstream, the open bug count, and
+;; (across the repos owned by `project-overview-github-user') the total
+;; open GitHub issues and pull requests.
 ;; The mode line shows the full path of the project under point.
 ;;
 ;; Single keys act on the project under point, reusing project.el where
@@ -57,22 +58,24 @@
 ;;
 ;;   RET / o  switch to project        c  preview latest CHANGELOG entry
 ;;   f        find file                C  open CHANGELOG.org (window right)
-;;   G        find regexp              b  open BUGS.org (window right)
-;;   d        find directory           B  TODO agenda for this project's bugs
-;;   e        eshell                   A  TODO agenda for all projects' bugs
-;;   s        search (ripgrep)         /  filter the view (transient)
-;;   v        vc-dir                   g  refresh (re-scan)
-;;   m        magit-status             r  cache / pull (transient)
-;;   D        dired at root            ?  transient menu of all actions
-;;   !        shell at root            V  cycle column layout
+;;   G        find regexp              R  open README (window right)
+;;   d        find directory           b  open BUGS.org (window right)
+;;   e        eshell                   B  TODO agenda for this project's bugs
+;;   s        search (ripgrep)         A  TODO agenda for all projects' bugs
+;;   v        vc-dir                   /  filter the view (transient)
+;;   m        magit-status             g  refresh (re-scan)
+;;   D        dired at root            r  cache / pull (transient)
+;;   !        shell at root            ?  transient menu of all actions
+;;                                     V  cycle column layout
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
-;; dirty repos, repos with open bugs, repos out of sync with upstream, or
-;; a name regexp.  The active filter and shown/total count appear in the
-;; mode line, and survive a refresh until cleared with `/ a'.
+;; dirty repos, repos with open bugs, repos out of sync with upstream,
+;; repos owned by `project-overview-github-user', or a name regexp.  The
+;; active filter and shown/total count appear in the mode line, and
+;; survive a refresh until cleared with `/ a'.
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
@@ -222,6 +225,14 @@ Must be a key of `project-overview-views'.  When
 `project-overview-set-view' is remembered in
 `project-overview-state-file' and takes precedence over this value."
   :type 'symbol
+  :group 'project-overview)
+
+(defcustom project-overview-show-description nil
+  "When non-nil, show the Description column in every view.
+Off by default, since the description is wide; toggle it per buffer
+with `project-overview-toggle-description', which adds or removes the
+column whatever the active view."
+  :type 'boolean
   :group 'project-overview)
 
 (defcustom project-overview-remember-view t
@@ -782,9 +793,10 @@ Uses the cached git info, falling back to a fresh probe of ROOT."
   "Convert issue/PR BODY (GitHub Markdown) to a safe Org fragment.
 Fenced ```` ``` ```` / ~~~ code blocks become Org source blocks (using
 the fence's language when given), so snippets fontify instead of
-showing raw fences.  Lines outside code are indented two spaces, which
-keeps a leading \"*\" or \"#\" from starting an Org heading or keyword
-and so prevents item bodies from breaking the buffer's outline."
+showing raw fences.  Text sits at column 0 so it lines up with the
+heading and PROPERTIES drawer; only a line that would otherwise start
+an Org heading (a leading \"*\", as in a Markdown bullet) is indented,
+which keeps item bodies from breaking the buffer's outline."
   (if (or (null body) (string-empty-p (string-trim body)))
       ""
     (let ((lines (split-string
@@ -803,18 +815,16 @@ and so prevents item bodies from breaking the buffer's outline."
                       (concat "#+begin_src " lang))
                     out)
               (setq in-code t))))
-         ;; Verbatim inside a code block, and prose outside it, both kept
-         ;; at column 0 here; uniform indentation is applied below.
+         ;; Verbatim inside a code block.
+         (in-code (push line out))
+         ;; A leading "*" at column 0 is an Org heading; indent it so the
+         ;; line stays within the entry (Markdown bullets become list items).
+         ((string-prefix-p "*" line) (push (concat "  " line) out))
+         ;; Ordinary prose, kept at column 0 to align with the drawer.
          (t (push line out))))
       ;; Close an unterminated fence so the block stays well-formed.
       (when in-code (push "#+end_src" out))
-      ;; Indent every non-empty line two spaces.  This keeps a leading "*"
-      ;; or "#" from starting an Org heading/keyword and aligns the source
-      ;; blocks (which Org still recognises when indented) with the prose,
-      ;; avoiding the offset between snippets and surrounding text.
-      (concat (mapconcat (lambda (l) (if (string-empty-p l) l (concat "  " l)))
-                         (nreverse out) "\n")
-              "\n"))))
+      (concat (mapconcat #'identity (nreverse out) "\n") "\n"))))
 
 (defun project-overview--github-render (kind slug items)
   "Render ITEMS (issues or PRs) for SLUG into an Org buffer and show it.
@@ -999,13 +1009,28 @@ takes precedence over `project-overview-default-view'."
 
 (defvar-local project-overview--hide-description nil
   "When non-nil, omit the Description column whatever the active view.
-Toggled with `project-overview-toggle-description'.")
+Initialised per buffer from `project-overview-show-description' and
+toggled with `project-overview-toggle-description'.")
+
+(defun project-overview--with-description (cols)
+  "Return COLS with the Description column present.
+Already-present COLS are returned unchanged; otherwise `description' is
+inserted just before `path' when that is shown, else appended."
+  (cond
+   ((memq 'description cols) cols)
+   ((memq 'path cols)
+    (let (out)
+      (dolist (c cols (nreverse out))
+        (when (eq c 'path) (push 'description out))
+        (push c out))))
+   (t (append cols (list 'description)))))
 
 (defun project-overview--view-columns ()
   "Return the list of column ids for the active view.
 Falls back to the effective default view then the `full' layout when
-the current view is unset or unknown.  The Description column is
-dropped when `project-overview--hide-description' is set."
+the current view is unset or unknown.  The Description column is added
+to (or dropped from) any view according to
+`project-overview--hide-description', so it can be toggled everywhere."
   (let ((cols (or (cdr (assq (or project-overview--view
                                  (project-overview--effective-default-view))
                              project-overview-views))
@@ -1013,7 +1038,7 @@ dropped when `project-overview--hide-description' is set."
                   (mapcar #'car project-overview--columns))))
     (if project-overview--hide-description
         (remq 'description cols)
-      cols)))
+      (project-overview--with-description cols))))
 
 (defun project-overview--format ()
   "Return the `tabulated-list-format' vector for the active view."
@@ -1157,6 +1182,20 @@ VIEW is a key of `project-overview-views'."
   (interactive)
   (let ((f (expand-file-name "BUGS.org" (project-overview--root))))
     (unless (file-exists-p f) (user-error "No BUGS.org in this project"))
+    (select-window
+     (display-buffer (find-file-noselect f)
+                     '(display-buffer-in-direction (direction . right))))))
+
+(defun project-overview-readme ()
+  "Visit the README of the project under point in a window to the right.
+Looks for README.org, README.md, README.rst, README.txt or README."
+  (interactive)
+  (let* ((root (project-overview--root))
+         (f (seq-find #'file-readable-p
+                      (mapcar (lambda (n) (expand-file-name n root))
+                              '("README.org" "README.md" "readme.org"
+                                "README.rst" "README.txt" "README")))))
+    (unless f (user-error "No README in this project"))
     (select-window
      (display-buffer (find-file-noselect f)
                      '(display-buffer-in-direction (direction . right))))))
@@ -1372,6 +1411,13 @@ list) is taken from the cache while it is fresh.  Use
     (or (> (plist-get git :ahead) 0)
         (> (plist-get git :behind) 0))))
 
+(defun project-overview--filter-owned (cell)
+  "Keep CELL when its remote owner is `project-overview-github-user'."
+  (and (stringp project-overview-github-user)
+       (not (string-empty-p project-overview-github-user))
+       (equal (plist-get (plist-get (cdr cell) :git) :owner)
+              project-overview-github-user)))
+
 (defun project-overview--apply-filter (label predicate)
   "Filter the dashboard to projects matching PREDICATE, described by LABEL.
 A nil PREDICATE clears the filter.  Updates the mode line with the
@@ -1413,6 +1459,16 @@ shown/total counts and redraws."
    (lambda (cell)
      (string-match-p regexp (plist-get (cdr cell) :name)))))
 
+(defun project-overview-filter-owned ()
+  "Show only projects owned by `project-overview-github-user'."
+  (interactive)
+  (unless (and (stringp project-overview-github-user)
+               (not (string-empty-p project-overview-github-user)))
+    (user-error "`project-overview-github-user' is not set"))
+  (project-overview--apply-filter
+   (format "owned by %s" project-overview-github-user)
+   #'project-overview--filter-owned))
+
 (defun project-overview-filter-clear ()
   "Clear any active filter and show every project."
   (interactive)
@@ -1441,6 +1497,7 @@ shown/total counts and redraws."
    ["Inspect"
     ("c" "preview changelog" project-overview-changelog-preview)
     ("C" "CHANGELOG.org"     project-overview-changelog)
+    ("R" "README"            project-overview-readme)
     ("b" "BUGS.org"          project-overview-bugs-file)
     ("B" "bugs agenda"       project-overview-bugs-agenda)
     ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)
@@ -1492,6 +1549,7 @@ be hidden or shown without switching layouts."
    ("d" "dirty (uncommitted changes)" project-overview-filter-dirty)
    ("b" "with open bugs"              project-overview-filter-bugs)
    ("u" "out of sync (ahead/behind)"  project-overview-filter-out-of-sync)
+   ("o" "owned by me"                 project-overview-filter-owned)
    ("n" "matching a name regexp…"     project-overview-filter-name)]
   ["Filter"
    ("a" "all (clear filter)"          project-overview-filter-clear)
@@ -1500,11 +1558,12 @@ be hidden or shown without switching layouts."
 ;;; Header line
 
 (defun project-overview--header-count (n label)
-  "Return header-line segment \" · N LABEL\", bold when N is positive.
-Bold only sets the weight, so the colour stays that of the surrounding
-`header-line' face."
-  (let ((s (format " · %d %s" n label)))
-    (if (> n 0) (propertize s 'face 'bold) s)))
+  "Return header-line segment \" · N LABEL\" when N is positive, else \"\".
+Zero counts are dropped to keep the line compact; shown counts are
+bold (weight only, so the surrounding `header-line' colour is kept)."
+  (if (> n 0)
+      (propertize (format " · %d %s" n label) 'face 'bold)
+    ""))
 
 (defun project-overview--owned-github-totals ()
   "Return cons (ISSUES . PRS) summed over `project-overview-github-user' repos.
@@ -1522,43 +1581,35 @@ user is unset."
     (cons issues prs)))
 
 (defun project-overview--header-line ()
-  "Return the aggregate status header-line for the dashboard.
-The leading counts are taken from the full project set; when a filter
-is active it is appended, with the number of projects it shows.  Only
-weight (bold) is used for emphasis, so the whole line keeps the theme's
-`header-line' colour and stays readable."
+  "Return the compact aggregate status header-line for the dashboard.
+Leads with the active view, then the project total and the non-zero
+counts (dirty, out of sync, bugs, and owned GitHub issues/PRs); zero
+counts are omitted.  An active filter is appended with its shown count.
+Only weight (bold) is used for emphasis, so the line keeps the theme's
+`header-line' colour."
   (let* ((cache project-overview--cache)
          (total (length cache))
          (dirty (seq-count #'project-overview--filter-dirty cache))
          (sync  (seq-count #'project-overview--filter-out-of-sync cache))
-         (open  (apply #'+ (mapcar (lambda (c) (plist-get (cdr c) :open)) cache))))
+         (open  (apply #'+ (mapcar (lambda (c) (plist-get (cdr c) :open)) cache)))
+         (view  (or project-overview--view
+                    (project-overview--effective-default-view))))
     (concat
-     (propertize (format " %d project%s" total (if (= total 1) "" "s"))
-                 'face 'bold)
+     (propertize (format " [%s]" (upcase (symbol-name view))) 'face 'bold)
+     (propertize (format " %d proj" total) 'face 'bold)
      (project-overview--header-count dirty "dirty")
-     (project-overview--header-count sync "out of sync")
-     (project-overview--header-count
-      open (format "open bug%s" (if (= open 1) "" "s")))
+     (project-overview--header-count sync "unsynced")
+     (project-overview--header-count open (format "bug%s" (if (= open 1) "" "s")))
      (when (and project-overview-show-github
                 (stringp project-overview-github-user)
                 (not (string-empty-p project-overview-github-user)))
-       (let* ((gh (project-overview--owned-github-totals))
-              (issues (car gh))
-              (prs (cdr gh)))
+       (let ((gh (project-overview--owned-github-totals)))
          (concat
-          (project-overview--header-count
-           issues (format "open issue%s" (if (= issues 1) "" "s")))
-          (project-overview--header-count
-           prs (format "open PR%s" (if (= prs 1) "" "s"))))))
-     (concat " · view: "
-             (propertize (symbol-name (or project-overview--view
-                                          (project-overview--effective-default-view)))
-                         'face 'bold)
-             (if project-overview--hide-description " (no desc)" ""))
+          (project-overview--header-count (car gh) "iss")
+          (project-overview--header-count (cdr gh) "PR"))))
      (when project-overview--filter
        (let ((shown (seq-count (cdr project-overview--filter) cache)))
-         (propertize (format "    ⦅ filter: %s — %d shown ⦆"
-                             (car project-overview--filter) shown)
+         (propertize (format " ⦅%s: %d⦆" (car project-overview--filter) shown)
                      'face 'bold))))))
 
 (defun project-overview--path-mode-line ()
@@ -1588,6 +1639,7 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
     ;; Inspect.
     (define-key map "c" #'project-overview-changelog-preview)
     (define-key map "C" #'project-overview-changelog)
+    (define-key map "R" #'project-overview-readme)
     (define-key map "b" #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
@@ -1611,6 +1663,8 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
   ;; Free the window header line for the aggregate summary by printing the
   ;; (still sortable) column headers at the top of the buffer instead.
   (setq tabulated-list-use-header-line nil)
+  ;; Hide the Description column unless `project-overview-show-description'.
+  (setq project-overview--hide-description (not project-overview-show-description))
   ;; Install the columns for the active view (default
   ;; `project-overview-default-view'), which also sets the sort key —
   ;; most recently committed projects first when the Commit column is shown.
