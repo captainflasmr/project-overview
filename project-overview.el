@@ -1325,7 +1325,10 @@ The entry is shown read-only in a right-hand side window."
           (erase-buffer)
           (insert (or text "No entries"))
           (goto-char (point-min))
-          (delay-mode-hooks (org-mode))
+          ;; Activate Org fully (run `org-mode-hook', fontify, etc.) so the
+          ;; preview looks like a normal Org buffer.
+          (org-mode)
+          (font-lock-ensure)
           (visual-line-mode 1)
           (view-mode 1)))
       (display-buffer buf '(display-buffer-in-side-window
