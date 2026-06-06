@@ -50,6 +50,9 @@
 ;; open GitHub issues and pull requests.
 ;; The mode line shows the full path of the project under point.
 ;;
+;; TAB / S-TAB move point to the next / previous column on the current
+;; row (`tabulated-list-next-column' / `tabulated-list-previous-column').
+;;
 ;; Single keys act on the project under point, reusing project.el where
 ;; possible.  See `project-overview-mode-map' for the full set:
 ;;
@@ -1653,6 +1656,9 @@ Only weight (bold) is used for emphasis, so the line keeps the theme's
     (define-key map "V" #'project-overview-cycle-view)
     (define-key map "t" #'project-overview-toggle-description)
     (define-key map "r" #'project-overview-cache-dispatch)
+    ;; Ergonomic column navigation (the inherited bindings are M-left/right).
+    (define-key map (kbd "TAB") #'tabulated-list-next-column)
+    (define-key map (kbd "<backtab>") #'tabulated-list-previous-column)
     (define-key map "g" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
