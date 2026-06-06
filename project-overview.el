@@ -1616,10 +1616,9 @@ be hidden or shown without switching layouts."
 
 (defun project-overview--header-count (n label)
   "Return header-line segment \" · N LABEL\" when N is positive, else \"\".
-Zero counts are dropped to keep the line compact; shown counts are
-bold (weight only, so the surrounding `header-line' colour is kept)."
+Zero counts are dropped to keep the line compact."
   (if (> n 0)
-      (propertize (format " · %d %s" n label) 'face 'bold)
+      (format " · %d %s" n label)
     ""))
 
 (defun project-overview--owned-github-totals (&optional cells)
@@ -1643,8 +1642,7 @@ Leads with the active view, then the project count and the non-zero
 counts (dirty, out of sync, bugs, and owned GitHub issues/PRs); zero
 counts are omitted.  When a filter is active every count reflects the
 filtered subset (so the totals shown are those of the listing on
-screen), and the filter name is appended.  Only weight (bold) is used
-for emphasis, so the line keeps the theme's `header-line' colour."
+screen), and the filter name is appended."
   (let* ((cache (if project-overview--filter
                     (seq-filter (cdr project-overview--filter)
                                 project-overview--cache)
@@ -1656,8 +1654,8 @@ for emphasis, so the line keeps the theme's `header-line' colour."
          (view  (or project-overview--view
                     (project-overview--effective-default-view))))
     (concat
-     (propertize (format " [%s]" (upcase (symbol-name view))) 'face 'bold)
-     (propertize (format " %d proj" total) 'face 'bold)
+     (format " [%s]" (upcase (symbol-name view)))
+     (format " %d proj" total)
      (project-overview--header-count dirty "dirty")
      (project-overview--header-count sync "unsynced")
      (project-overview--header-count open (format "bug%s" (if (= open 1) "" "s")))
@@ -1669,8 +1667,7 @@ for emphasis, so the line keeps the theme's `header-line' colour."
           (project-overview--header-count (car gh) "iss")
           (project-overview--header-count (cdr gh) "PR"))))
      (when project-overview--filter
-       (propertize (format " ⦅%s⦆" (car project-overview--filter))
-                   'face 'bold)))))
+       (format " ⦅%s⦆" (car project-overview--filter))))))
 
 (defun project-overview--path-mode-line ()
   "Return the abbreviated path of the project under point for the mode line."
