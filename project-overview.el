@@ -963,20 +963,24 @@ KIND is the symbol `issue' or `pr'.  Runs the gh CLI synchronously."
 
 (defun project-overview--col-github (cell)
   "Return open GitHub issue/PR counts for cache CELL, e.g. \"3i 1p\".
-Empty until the asynchronous fetch fills in :gh.  Zero counts are
-omitted, so a repository with no open issues or PRs shows blank; the
-counts that do appear use the `warning' face."
+Empty until the asynchronous fetch fills in :gh.  The issue count
+occupies a fixed-width field so the PR count keeps the same position
+across rows even when a project has no open issues (e.g. \"   1p\"); a
+project with neither shows blank.  Non-zero counts use the `warning'
+face."
   (let ((gh (plist-get (cdr cell) :gh)))
     (if (not gh)
         ""
-      (let* ((issues (or (car gh) 0))
-             (prs (or (cdr gh) 0))
-             (parts (delq nil
-                          (list (when (> issues 0)
-                                  (propertize (format "%di" issues) 'face 'warning))
-                                (when (> prs 0)
-                                  (propertize (format "%dp" prs) 'face 'warning))))))
-        (mapconcat #'identity parts " ")))))
+      (let ((issues (or (car gh) 0))
+            (prs (or (cdr gh) 0)))
+        (if (and (= issues 0) (= prs 0))
+            ""
+          (let* ((istr (if (> issues 0) (format "%di" issues) ""))
+                 (pstr (if (> prs 0) (format "%dp" prs) "")))
+            (concat
+             (if (> issues 0) (propertize istr 'face 'warning) istr)
+             (make-string (max 0 (- 3 (length istr))) ?\s)
+             (if (> prs 0) (propertize pstr 'face 'warning) pstr))))))))
 
 (defvar project-overview--columns
   (list
