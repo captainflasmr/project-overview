@@ -1618,15 +1618,15 @@ bold (weight only, so the surrounding `header-line' colour is kept)."
       (propertize (format " · %d %s" n label) 'face 'bold)
     ""))
 
-(defun project-overview--owned-github-totals ()
+(defun project-overview--owned-github-totals (&optional cells)
   "Return cons (ISSUES . PRS) summed over `project-overview-github-user' repos.
-Only projects whose remote owner matches the configured user and whose
-GitHub counts have been fetched contribute.  Returns (0 . 0) when the
-user is unset."
+Sums across CELLS (default `project-overview--cache'); only projects
+whose remote owner matches the configured user and whose GitHub counts
+have been fetched contribute.  Returns (0 . 0) when the user is unset."
   (let ((issues 0) (prs 0)
         (user project-overview-github-user))
     (when (and (stringp user) (not (string-empty-p user)))
-      (dolist (c project-overview--cache)
+      (dolist (c (or cells project-overview--cache))
         (let ((gh (plist-get (cdr c) :gh)))
           (when (and gh (equal (plist-get (plist-get (cdr c) :git) :owner) user))
             (setq issues (+ issues (or (car gh) 0))
@@ -1635,12 +1635,16 @@ user is unset."
 
 (defun project-overview--header-line ()
   "Return the compact aggregate status header-line for the dashboard.
-Leads with the active view, then the project total and the non-zero
+Leads with the active view, then the project count and the non-zero
 counts (dirty, out of sync, bugs, and owned GitHub issues/PRs); zero
-counts are omitted.  An active filter is appended with its shown count.
-Only weight (bold) is used for emphasis, so the line keeps the theme's
-`header-line' colour."
-  (let* ((cache project-overview--cache)
+counts are omitted.  When a filter is active every count reflects the
+filtered subset (so the totals shown are those of the listing on
+screen), and the filter name is appended.  Only weight (bold) is used
+for emphasis, so the line keeps the theme's `header-line' colour."
+  (let* ((cache (if project-overview--filter
+                    (seq-filter (cdr project-overview--filter)
+                                project-overview--cache)
+                  project-overview--cache))
          (total (length cache))
          (dirty (seq-count #'project-overview--filter-dirty cache))
          (sync  (seq-count #'project-overview--filter-out-of-sync cache))
@@ -1656,14 +1660,13 @@ Only weight (bold) is used for emphasis, so the line keeps the theme's
      (when (and project-overview-show-github
                 (stringp project-overview-github-user)
                 (not (string-empty-p project-overview-github-user)))
-       (let ((gh (project-overview--owned-github-totals)))
+       (let ((gh (project-overview--owned-github-totals cache)))
          (concat
           (project-overview--header-count (car gh) "iss")
           (project-overview--header-count (cdr gh) "PR"))))
      (when project-overview--filter
-       (let ((shown (seq-count (cdr project-overview--filter) cache)))
-         (propertize (format " ⦅%s: %d⦆" (car project-overview--filter) shown)
-                     'face 'bold))))))
+       (propertize (format " ⦅%s⦆" (car project-overview--filter))
+                   'face 'bold)))))
 
 (defun project-overview--path-mode-line ()
   "Return the abbreviated path of the project under point for the mode line."
