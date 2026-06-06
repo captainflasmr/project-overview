@@ -8,8 +8,10 @@
 - Persistent caching of network data: the MELPA package list and per-repository GitHub issue/PR counts are now cached on disk (~project-overview-cache-file~) with a ~project-overview-cache-ttl~ lifetime (default 1 day), surviving restarts so an ordinary refresh (~g~) reuses fresh data instead of re-hitting the network.
 - ~r~ (~project-overview-cache-dispatch~): a transient to force-pull fresh GitHub counts, the MELPA list, or everything, and to clear the on-disk cache.
 - New filter ~/ o~ (~project-overview-filter-owned~): show only repositories owned by ~project-overview-github-user~.
+- New filter ~/ m~ (~project-overview-filter-melpa~): show only repositories whose package is available on MELPA.
 - ~R~ (~project-overview-readme~): open the README (~.org~/~.md~/~.rst~/~.txt~/plain) of the project under point in a window to the right.
 - ~TAB~ / ~S-TAB~ now move to the next / previous column (more ergonomic than the inherited ~M-left~/~M-right~).
+- ~w~ (~project-overview-browse-remote~): open the project's remote repository (GitHub, GitLab, …) in a web browser, configurable via ~project-overview-browse-url-function~ (defaults to ~browse-url~; set to e.g. ~browse-url-firefox~ to always use Firefox).
 - ~t~ (~project-overview-toggle-description~): quickly hide or show the ~Description~ column on top of any view (it is added to or removed from the active layout, not just views that already list it), without switching layouts.  The column is hidden by default now; set ~project-overview-show-description~ to show it on open.
 - ~Path~ column: the project's root directory (abbreviated, e.g. ~~/source/repos/foo~).
 - Selectable column layouts (views): ~V~ (~project-overview-cycle-view~) steps through ~full~ (every column), ~minimal~, ~status~ (branch/git/bugs), and ~remote~ (forge/owner) one press at a time, wrapping round (a prefix argument cycles backwards).  Layouts are defined in ~project-overview-views~ and the opening layout in ~project-overview-default-view~.

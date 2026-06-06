@@ -69,16 +69,17 @@
 ;;   m        magit-status             g  refresh (re-scan)
 ;;   D        dired at root            r  cache / pull (transient)
 ;;   !        shell at root            ?  transient menu of all actions
-;;                                     V  cycle column layout
+;;   w        browse remote in browser V  cycle column layout
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream,
-;; repos owned by `project-overview-github-user', or a name regexp.  The
-;; active filter and shown/total count appear in the mode line, and
-;; survive a refresh until cleared with `/ a'.
+;; repos owned by `project-overview-github-user', repos available on
+;; MELPA, or a name regexp.  The active filter and shown/total count
+;; appear in the mode line, and survive a refresh until cleared with
+;; `/ a'.
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
@@ -171,12 +172,21 @@ the network calls entirely."
   :type 'boolean
   :group 'project-overview)
 
-(defcustom project-overview-github-user "captainflasmr"
+(defcustom project-overview-browse-url-function #'browse-url
+  "Function used by `project-overview-browse-remote' to open a URL.
+Called with one argument, the URL string.  Defaults to `browse-url'
+\(your system default).  Set it to e.g. `browse-url-firefox' to always
+use Firefox regardless of the system default, or to any function of one
+URL argument."
+  :type 'function
+  :group 'project-overview)
+
+(defcustom project-overview-github-user nil
   "GitHub username whose repositories are summarised in the header line.
 The total open issues and pull requests across the projects owned by
 this user (matched on the remote owner) are shown alongside the other
-header-line counts.  Set to nil or the empty string to omit that
-summary."
+header-line counts, and the \"owned\" filter uses it.  Nil or the empty
+string (the default) omits that summary and disables the filter."
   :type '(choice (const :tag "None" nil) string)
   :group 'project-overview)
 
@@ -617,6 +627,21 @@ trailing \".git\" and any slash are stripped)."
                     url)
       (match-string 1 url))
      (t ""))))
+
+(defun project-overview--remote-web-url (url)
+  "Convert git remote URL to a browsable https URL, or nil when unknown.
+Handles https://, ssh:// and scp-like \"git@host:owner/repo\" forms and
+strips any trailing \".git\"."
+  (when (and (stringp url) (not (string-empty-p url)))
+    (let ((u (replace-regexp-in-string "\\.git/?\\'" "" url)))
+      (cond
+       ;; scheme://[user@]host[:port]/path
+       ((string-match "\\`[a-zA-Z][a-zA-Z0-9+.-]*://\\(?:[^@/]+@\\)?\\(.+\\)\\'" u)
+        (concat "https://" (match-string 1 u)))
+       ;; scp-like: [user@]host:owner/repo
+       ((string-match "\\`\\(?:[^@/]+@\\)?\\([^/:]+\\):\\(.+\\)\\'" u)
+        (concat "https://" (match-string 1 u) "/" (match-string 2 u)))
+       (t nil)))))
 
 (defun project-overview--remote-url (root)
   "Return the URL of ROOT's origin remote, or the first remote, else nil."
@@ -1122,6 +1147,17 @@ VIEW is a key of `project-overview-views'."
       (magit-status (project-overview--root))
     (user-error "Magit is not available")))
 
+(defun project-overview-browse-remote ()
+  "Open the remote repository of the project under point in a web browser.
+Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
+  (interactive)
+  (let* ((root (project-overview--root))
+         (web (project-overview--remote-web-url
+               (project-overview--remote-url root))))
+    (unless web (user-error "No browsable remote for this project"))
+    (funcall project-overview-browse-url-function web)
+    (message "Opening %s" web)))
+
 (defun project-overview-search ()
   "Search the project under point (consult-ripgrep if available)."
   (interactive)
@@ -1424,6 +1460,10 @@ list) is taken from the cache while it is fresh.  Use
        (equal (plist-get (plist-get (cdr cell) :git) :owner)
               project-overview-github-user)))
 
+(defun project-overview--filter-melpa (cell)
+  "Keep CELL when a package of its name is available on MELPA."
+  (plist-get (cdr cell) :melpa))
+
 (defun project-overview--apply-filter (label predicate)
   "Filter the dashboard to projects matching PREDICATE, described by LABEL.
 A nil PREDICATE clears the filter.  Updates the mode line with the
@@ -1475,6 +1515,11 @@ shown/total counts and redraws."
    (format "owned by %s" project-overview-github-user)
    #'project-overview--filter-owned))
 
+(defun project-overview-filter-melpa ()
+  "Show only projects whose package is available on MELPA."
+  (interactive)
+  (project-overview--apply-filter "on MELPA" #'project-overview--filter-melpa))
+
 (defun project-overview-filter-clear ()
   "Clear any active filter and show every project."
   (interactive)
@@ -1512,11 +1557,12 @@ shown/total counts and redraws."
    ["VC & search"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
+    ("w" "browse remote"     project-overview-browse-remote)
     ("s" "search"            project-overview-search)]
    ["Dashboard"
     ("/" "filter…"        project-overview-filter-dispatch)
     ("V" "cycle view"     project-overview-cycle-view :transient t)
-    ("t" "toggle descrip" project-overview-toggle-description :transient t)
+    ("t" "toggle description" project-overview-toggle-description :transient t)
     ("g" "refresh"        project-overview-refresh :transient t)
     ("r" "cache / pull…"  project-overview-cache-dispatch)
     ("q" "quit"           transient-quit-one)]])
@@ -1556,6 +1602,7 @@ be hidden or shown without switching layouts."
    ("b" "with open bugs"              project-overview-filter-bugs)
    ("u" "out of sync (ahead/behind)"  project-overview-filter-out-of-sync)
    ("o" "owned by me"                 project-overview-filter-owned)
+   ("m" "on MELPA"                    project-overview-filter-melpa)
    ("n" "matching a name regexp…"     project-overview-filter-name)]
   ["Filter"
    ("a" "all (clear filter)"          project-overview-filter-clear)
@@ -1640,6 +1687,7 @@ Only weight (bold) is used for emphasis, so the line keeps the theme's
     (define-key map "e" #'project-overview-eshell)
     (define-key map "s" #'project-overview-search)
     (define-key map "m" #'project-overview-magit)
+    (define-key map "w" #'project-overview-browse-remote)
     (define-key map "D" #'project-overview-dired)
     (define-key map "!" #'project-overview-shell)
     ;; Inspect.
