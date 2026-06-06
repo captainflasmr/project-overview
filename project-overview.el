@@ -36,13 +36,17 @@
 ;;   - git branch, dirty flag, and ahead/behind state,
 ;;   - the remote forge (github, gitlab, …) or blank for local-only,
 ;;   - the remote owner/user (e.g. the GitHub username),
+;;   - for GitHub repos, the open issue and PR counts (via the gh CLI),
 ;;   - a check mark when the project is on Emacs's known-projects list,
+;;   - a check mark when a package of the same name is available on MELPA,
 ;;   - the last commit date,
 ;;   - a one-line description taken from the project's README, and
 ;;   - the project's root path.
 ;;
 ;; A header line summarises the whole set: total projects, how many are
-;; dirty, how many are out of sync with upstream, and the open bug count.
+;; dirty, how many are out of sync with upstream, the open bug count,
+;; — across the repos owned by `project-overview-github-user' — the total
+;; open GitHub issues and pull requests, and the active view.
 ;; The mode line shows the full path of the project under point.
 ;;
 ;; Single keys act on the project under point, reusing project.el where
@@ -58,9 +62,12 @@
 ;;   e        eshell                   A  TODO agenda for all projects' bugs
 ;;   s        search (ripgrep)         /  filter the view (transient)
 ;;   v        vc-dir                   g  refresh (re-scan)
-;;   m        magit-status             ?  transient menu of all actions
-;;   D        dired at root            V  switch column layout (transient)
-;;   !        shell at root
+;;   m        magit-status             r  cache / pull (transient)
+;;   D        dired at root            ?  transient menu of all actions
+;;   !        shell at root            V  cycle column layout
+;;                                     t  toggle the Description column
+;;                                     i  open GitHub issues (Org buffer)
+;;                                     P  open GitHub PRs (Org buffer)
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream, or
@@ -70,13 +77,21 @@
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
 ;;
-;; `V' (`project-overview-view-dispatch') switches the column layout
-;; between the named views in `project-overview-views': `full' (every
-;; column), `minimal', `status' (branch/git/bugs), and `remote'
-;; (forge/owner).  The opening layout is `project-overview-default-view';
+;; `V' (`project-overview-cycle-view') steps through the named column
+;; layouts in `project-overview-views' — `full' (every column),
+;; `minimal', `status' (branch/git/bugs), and `remote' (forge/owner) —
+;; one per press, wrapping round (a prefix arg cycles backwards); stop on
+;; the one you want.  The opening layout is `project-overview-default-view';
 ;; unless `project-overview-remember-view' is nil, the last view chosen
 ;; with `V' is remembered via `savehist' and reused as the opening
 ;; layout in the next session.
+;;
+;; Network data — the MELPA package list and per-repository GitHub
+;; issue/PR counts — is cached on disk in `project-overview-cache-file'
+;; with a `project-overview-cache-ttl' lifetime, so it survives restarts
+;; and an ordinary refresh (`g') need not hit the network.  `r'
+;; (`project-overview-cache-dispatch') force-pulls fresh GitHub counts,
+;; the MELPA list, or everything, and can clear the cache.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -104,6 +119,10 @@
 (defvar org-agenda-sticky)
 (defvar project-current-directory-override)
 (defvar savehist-additional-variables)
+(defvar package-archive-contents)
+(declare-function package-desc-archive "package" (cl-x))
+(declare-function url-retrieve "url"
+                  (url callback &optional cbargs silent inhibit-cookies))
 
 ;;; Customization
 
@@ -137,12 +156,58 @@ under `project-overview-search-roots'."
   :type 'string
   :group 'project-overview)
 
+(defcustom project-overview-show-github t
+  "When non-nil, fetch open issue and PR counts for GitHub repositories.
+Counts are retrieved asynchronously with the GitHub CLI (\"gh\", which
+must be installed and authenticated) and shown in the GitHub column,
+filling in shortly after the dashboard is drawn.  Set to nil to skip
+the network calls entirely."
+  :type 'boolean
+  :group 'project-overview)
+
+(defcustom project-overview-github-user "captainflasmr"
+  "GitHub username whose repositories are summarised in the header line.
+The total open issues and pull requests across the projects owned by
+this user (matched on the remote owner) are shown alongside the other
+header-line counts.  Set to nil or the empty string to omit that
+summary."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'project-overview)
+
+(defcustom project-overview-melpa-fallback t
+  "When non-nil, fall back to fetching the MELPA package list from melpa.org.
+Used only when package.el has no local MELPA archive contents (so the
+MELPA column would otherwise be blank).  The list is downloaded once
+per session, asynchronously, and the column fills in when it arrives.
+Set to nil to keep the MELPA check entirely offline."
+  :type 'boolean
+  :group 'project-overview)
+
+(defcustom project-overview-cache-file
+  (locate-user-emacs-file "project-overview-cache.el")
+  "File persisting network-derived data between sessions.
+Holds the fetched MELPA package list and per-repository GitHub
+issue/PR counts, each stamped with a fetch time so it can expire (see
+`project-overview-cache-ttl').  Set to nil to keep this data for the
+current session only."
+  :type '(choice file (const :tag "Session only" nil))
+  :group 'project-overview)
+
+(defcustom project-overview-cache-ttl 86400
+  "Seconds a cached network result stays fresh before being re-fetched.
+Applies to the MELPA package list and to per-repository GitHub counts.
+A normal refresh (\\[project-overview-refresh]) reuses cached data
+while it is fresh; the pull commands in `project-overview-cache-dispatch'
+force a re-fetch regardless."
+  :type 'integer
+  :group 'project-overview)
+
 (defcustom project-overview-views
-  '((full    . (name version changelog bugs branch git remote owner known commit
-                     description path))
+  '((full    . (name version changelog bugs branch git remote owner github known
+                     melpa commit description path))
     (minimal . (name version bugs commit path))
-    (status  . (name bugs branch git commit))
-    (remote  . (name remote owner known path)))
+    (status  . (name bugs branch git github commit))
+    (remote  . (name remote owner github known melpa path)))
   "Named column layouts for the dashboard.
 Each entry is (NAME . COLUMNS) where COLUMNS is a list of column ids
 drawn from `project-overview--columns'.  `project-overview-set-view'
@@ -182,6 +247,85 @@ LABEL is a short string shown in the mode line.")
   "Symbol naming the active column layout, or nil for the default.
 Resolved against `project-overview-views', falling back to
 `project-overview-default-view' then `full'.")
+
+;;; Persistent cache
+
+;; A single on-disk store (`project-overview-cache-file') holds the
+;; network-derived data that is slow or rate-limited to obtain: the MELPA
+;; package list and per-repository GitHub issue/PR counts.  Each entry is
+;; time-stamped so it can expire after `project-overview-cache-ttl', and
+;; the pull commands can force a refresh.
+
+(defvar project-overview--cache-store 'unset
+  "In-memory copy of `project-overview-cache-file'.
+The sentinel `unset' means the file has not been read yet; otherwise a
+plist with keys :melpa and :github (see the cache accessors).")
+
+(defvar project-overview--melpa-cache nil
+  "Hash table of package symbols available from MELPA, or nil.
+Populated from the persistent cache or a melpa.org fetch and used as a
+fallback when the local `package-archive-contents' lacks MELPA.")
+
+(defvar project-overview--melpa-fetching nil
+  "Non-nil while a melpa.org archive fetch is in flight.")
+
+(defun project-overview--cache-load ()
+  "Read `project-overview-cache-file' into `project-overview--cache-store'.
+Reads at most once; subsequent calls are no-ops until the store is
+reset.  A missing or unreadable file yields an empty store."
+  (when (eq project-overview--cache-store 'unset)
+    (setq project-overview--cache-store
+          (or (and project-overview-cache-file
+                   (file-readable-p project-overview-cache-file)
+                   (ignore-errors
+                     (with-temp-buffer
+                       (insert-file-contents project-overview-cache-file)
+                       (read (current-buffer)))))
+              nil)))
+  project-overview--cache-store)
+
+(defun project-overview--cache-save ()
+  "Write `project-overview--cache-store' to `project-overview-cache-file'."
+  (when (and project-overview-cache-file
+             (not (eq project-overview--cache-store 'unset)))
+    (ignore-errors
+      (with-temp-file project-overview-cache-file
+        (let ((print-length nil) (print-level nil))
+          (prin1 project-overview--cache-store (current-buffer))
+          (terpri (current-buffer)))))))
+
+(defun project-overview--cache-get (key)
+  "Return the cached value stored under KEY."
+  (project-overview--cache-load)
+  (plist-get project-overview--cache-store key))
+
+(defun project-overview--cache-put (key value)
+  "Store VALUE under KEY in the cache and persist it."
+  (project-overview--cache-load)
+  (setq project-overview--cache-store
+        (plist-put project-overview--cache-store key value))
+  (project-overview--cache-save))
+
+(defun project-overview--cache-fresh-p (time)
+  "Return non-nil when TIME (a float-time) is within the cache TTL."
+  (and (numberp time)
+       (< (- (float-time) time) project-overview-cache-ttl)))
+
+(defun project-overview--cache-reset ()
+  "Forget the on-disk cache and any in-memory derivations of it."
+  (when (and project-overview-cache-file
+             (file-exists-p project-overview-cache-file))
+    (ignore-errors (delete-file project-overview-cache-file)))
+  (setq project-overview--cache-store nil
+        project-overview--melpa-cache nil))
+
+(defun project-overview--redraw ()
+  "Reprint the live dashboard buffer in place, keeping point."
+  (let ((buf (get-buffer project-overview-buffer-name)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (when (derived-mode-p 'project-overview-mode)
+          (tabulated-list-print t))))))
 
 ;;; Scanning
 
@@ -240,6 +384,94 @@ so membership can be tested with `gethash'."
       (dolist (r (project-known-project-roots))
         (puthash (directory-file-name (expand-file-name r)) t h)))
     h))
+
+(defun project-overview--melpa-local-names ()
+  "Return a hash table of package names (symbols) available from MELPA.
+Built from `package-archive-contents', so it reflects the archives the
+user has configured and refreshed; a package counts when any of its
+available versions comes from the \"melpa\" or \"melpa-stable\" archive.
+Empty when package.el has no archive contents loaded."
+  (let ((h (make-hash-table :test 'eq)))
+    (when (and (require 'package nil t)
+               (bound-and-true-p package-archive-contents))
+      (dolist (entry package-archive-contents)
+        (when (seq-find (lambda (desc)
+                          (member (package-desc-archive desc)
+                                  '("melpa" "melpa-stable")))
+                        (cdr entry))
+          (puthash (car entry) t h))))
+    h))
+
+(defun project-overview--melpa-cache-load ()
+  "Populate `project-overview--melpa-cache' from the persistent cache.
+Loads the stored melpa.org name list into a hash table when it is
+present and still fresh.  Returns the in-memory table (possibly nil)."
+  (when (not project-overview--melpa-cache)
+    (let ((entry (project-overview--cache-get :melpa)))
+      (when (and entry (project-overview--cache-fresh-p (car entry)))
+        (let ((h (make-hash-table :test 'eq)))
+          (dolist (s (cdr entry)) (puthash s t h))
+          (setq project-overview--melpa-cache h)))))
+  project-overview--melpa-cache)
+
+(defun project-overview--melpa-names ()
+  "Return the MELPA package-name set to use when scanning.
+Prefers the local `package-archive-contents'; when that has no MELPA
+entries, falls back to the cached melpa.org list (from disk or a
+previous fetch), which may be empty until one arrives."
+  (let ((local (project-overview--melpa-local-names)))
+    (if (> (hash-table-count local) 0)
+        local
+      (project-overview--melpa-cache-load)
+      (or project-overview--melpa-cache local))))
+
+(defun project-overview--melpa-apply (table)
+  "Recompute each project's :melpa flag from TABLE and redraw.
+Used after a melpa.org fetch to fill the MELPA column."
+  (dolist (cell project-overview--cache)
+    (let ((name (plist-get (cdr cell) :name)))
+      (setcdr cell (plist-put (cdr cell) :melpa
+                              (and (gethash (intern name) table) t)))))
+  (project-overview--redraw))
+
+(defun project-overview--melpa-fetch-callback (status)
+  "Parse the melpa.org archive in the current buffer, cache it, and apply.
+STATUS is the `url-retrieve' status plist."
+  (unwind-protect
+      (unless (plist-get status :error)
+        (goto-char (point-min))
+        (when (re-search-forward "\n\r?\n" nil t)
+          (let ((data (ignore-errors
+                        (json-parse-buffer :object-type 'alist
+                                           :null-object nil))))
+            (when data
+              (let ((h (make-hash-table :test 'eq))
+                    (names (mapcar #'car data)))
+                (dolist (s names) (puthash s t h))
+                (setq project-overview--melpa-cache h)
+                (project-overview--cache-put :melpa (cons (float-time) names))
+                (project-overview--melpa-apply h))))))
+    (setq project-overview--melpa-fetching nil)
+    (when (buffer-live-p (current-buffer))
+      (kill-buffer (current-buffer)))))
+
+(defun project-overview--melpa-maybe-fetch (&optional force)
+  "Fetch the melpa.org package list asynchronously if needed.
+No-op unless `project-overview-melpa-fallback' is on, no fetch is in
+flight, and the local archive contents lack MELPA.  Without FORCE, a
+fresh cached list (in memory or on disk) is reused instead of
+re-fetching; FORCE ignores the cache and pulls a new copy."
+  (when (and project-overview-melpa-fallback
+             (not project-overview--melpa-fetching)
+             (= 0 (hash-table-count (project-overview--melpa-local-names))))
+    (unless force (project-overview--melpa-cache-load))
+    (when (or force (not project-overview--melpa-cache))
+      (require 'url)
+      (setq project-overview--melpa-fetching t)
+      (condition-case nil
+          (url-retrieve "https://melpa.org/archive.json"
+                        #'project-overview--melpa-fetch-callback nil t t)
+        (error (setq project-overview--melpa-fetching nil))))))
 
 (defun project-overview--changelog (root)
   "Return cons (VERSION . DATE) from the latest CHANGELOG.org entry in ROOT.
@@ -354,6 +586,24 @@ For e.g. \"git@github.com:alice/repo.git\" or
       (match-string 1 url))
      (t ""))))
 
+(defun project-overview--remote-repo (url)
+  "Return the repository name segment of git remote URL, or \"\" when unknown.
+For e.g. \"git@github.com:alice/repo.git\" or
+\"https://github.com/alice/repo.git\" this returns \"repo\" (the
+trailing \".git\" and any slash are stripped)."
+  (if (or (null url) (string-empty-p url))
+      ""
+    (cond
+     ;; scp-like form: [user@]host:owner/repo[.git]
+     ((string-match "\\`\\(?:[^/@]+@\\)?[^/:]+:[^/]+/\\([^/]+?\\)\\(?:\\.git\\)?/?\\'"
+                    url)
+      (match-string 1 url))
+     ;; URL form: scheme://[user@]host[:port]/owner/repo[.git]
+     ((string-match "://\\(?:[^/@]+@\\)?[^/]+/[^/]+/\\([^/]+?\\)\\(?:\\.git\\)?/?\\'"
+                    url)
+      (match-string 1 url))
+     (t ""))))
+
 (defun project-overview--remote-url (root)
   "Return the URL of ROOT's origin remote, or the first remote, else nil."
   (or (project-overview--git root "config" "--get" "remote.origin.url")
@@ -364,7 +614,8 @@ For e.g. \"git@github.com:alice/repo.git\" or
                                          (car (split-string remotes "\n"))))))))
 
 (defun project-overview--git-info (root)
-  "Return a plist :branch :dirty :commit :ahead :behind :host for ROOT."
+  "Return a git status plist for ROOT.
+Keys: :branch :dirty :commit :ahead :behind :host :owner :repo."
   (let* ((branch (or (project-overview--git root "symbolic-ref" "--short" "HEAD")
                      (project-overview--git root "rev-parse" "--short" "HEAD")
                      ""))
@@ -378,33 +629,279 @@ For e.g. \"git@github.com:alice/repo.git\" or
          (url (project-overview--remote-url root))
          (host (project-overview--remote-host url))
          (owner (project-overview--remote-owner url))
+         (repo (project-overview--remote-repo url))
          ahead behind)
     (when (and ab (string-match "\\([0-9]+\\)[ \t]+\\([0-9]+\\)" ab))
       (setq ahead (string-to-number (match-string 1 ab))
             behind (string-to-number (match-string 2 ab))))
     (list :branch branch :dirty dirty :commit commit
           :ahead (or ahead 0) :behind (or behind 0)
-          :host host :owner owner)))
+          :host host :owner owner :repo repo)))
 
 (defun project-overview--scan ()
   "Scan all discovered projects and populate `project-overview--cache'."
-  (let ((known (project-overview--known-roots)))
+  (let ((known (project-overview--known-roots))
+        (melpa (project-overview--melpa-names)))
     (setq project-overview--cache
           (mapcar
            (lambda (root)
-             (let ((cl (project-overview--changelog root))
-                   (bugs (project-overview--bugs root))
-                   (git (project-overview--git-info root)))
+             (let* ((cl (project-overview--changelog root))
+                    (bugs (project-overview--bugs root))
+                    (git (project-overview--git-info root))
+                    (name (file-name-nondirectory (directory-file-name root))))
                (cons root
-                     (list :name (file-name-nondirectory (directory-file-name root))
+                     (list :name name
                            :version (or (car cl) "")
                            :changed (or (cdr cl) "")
                            :open (car bugs)
                            :total (cdr bugs)
                            :desc (project-overview--description root)
                            :known (and (gethash root known) t)
+                           :melpa (and (gethash (intern name) melpa) t)
                            :git git))))
            (project-overview--discover)))))
+
+;;; GitHub integration
+
+(defconst project-overview--github-query
+  (concat "query($o:String!,$n:String!){"
+          "repository(owner:$o,name:$n){"
+          "issues(states:OPEN){totalCount} "
+          "pullRequests(states:OPEN){totalCount}}}")
+  "GraphQL query fetching open issue and PR counts for one repository.")
+
+(defun project-overview--github-cache-get (slug)
+  "Return (ISSUES PRS) cached for SLUG when still fresh, else nil."
+  (let ((entry (cdr (assoc slug (project-overview--cache-get :github)))))
+    (when (and entry (project-overview--cache-fresh-p (nth 0 entry)))
+      (list (nth 1 entry) (nth 2 entry)))))
+
+(defun project-overview--github-cache-put (slug issues prs)
+  "Store ISSUES and PRS for SLUG in the persistent cache, stamped now."
+  (let* ((gh (project-overview--cache-get :github))
+         (entry (assoc slug gh))
+         (val (list (float-time) issues prs)))
+    (if entry
+        (setcdr entry val)
+      (setq gh (cons (cons slug val) gh)))
+    (project-overview--cache-put :github gh)))
+
+(defun project-overview--github-set (root issues prs)
+  "Set ROOT's cached :gh counts in the live data without redrawing."
+  (let ((cell (assoc root project-overview--cache)))
+    (when cell
+      (setcdr cell (plist-put (cdr cell) :gh (cons issues prs))))))
+
+(defun project-overview--github-update (root issues prs)
+  "Store ISSUES and PRS counts for ROOT and redraw the dashboard."
+  (project-overview--github-set root issues prs)
+  (project-overview--redraw))
+
+(defun project-overview--github-fetch (root owner repo)
+  "Asynchronously fetch open issue/PR counts for OWNER/REPO of ROOT.
+Runs \"gh api graphql\" and, on success, caches the counts and calls
+`project-overview--github-update'.  Does nothing when gh is missing or
+OWNER/REPO are unknown."
+  (when (and (executable-find "gh")
+             (stringp owner) (not (string-empty-p owner))
+             (stringp repo) (not (string-empty-p repo)))
+    (let ((buf (generate-new-buffer " *project-overview-gh*"))
+          (slug (concat owner "/" repo)))
+      (condition-case nil
+          (make-process
+           :name "project-overview-gh"
+           :buffer buf
+           :noquery t
+           :connection-type 'pipe
+           :command (list "gh" "api" "graphql"
+                          "-f" (concat "query=" project-overview--github-query)
+                          "-f" (concat "o=" owner)
+                          "-f" (concat "n=" repo))
+           :sentinel
+           (lambda (proc _event)
+             (when (memq (process-status proc) '(exit signal))
+               (unwind-protect
+                   (when (and (eq (process-exit-status proc) 0)
+                              (buffer-live-p (process-buffer proc)))
+                     (with-current-buffer (process-buffer proc)
+                       (goto-char (point-min))
+                       (ignore-errors
+                         (let* ((data (json-parse-buffer :object-type 'alist
+                                                         :null-object nil))
+                                (r (alist-get 'repository
+                                              (alist-get 'data data))))
+                           (when r
+                             (let ((issues (alist-get 'totalCount
+                                                      (alist-get 'issues r)))
+                                   (prs (alist-get 'totalCount
+                                                   (alist-get 'pullRequests r))))
+                               (project-overview--github-cache-put slug issues prs)
+                               (project-overview--github-update root issues prs)))))))
+                 (when (buffer-live-p (process-buffer proc))
+                   (kill-buffer (process-buffer proc)))))))
+        (error (when (buffer-live-p buf) (kill-buffer buf)))))))
+
+(defun project-overview--github-fetch-all (&optional force)
+  "Populate GitHub issue/PR counts for every GitHub-hosted project.
+Fresh cached counts are applied without a network call; the rest are
+fetched asynchronously.  With FORCE, the cache is bypassed and every
+repository is re-queried.  No-op unless `project-overview-show-github'."
+  (when project-overview-show-github
+    (let (redrew)
+      (dolist (cell project-overview--cache)
+        (let ((git (plist-get (cdr cell) :git)))
+          (when (equal (plist-get git :host) "github")
+            (let ((owner (plist-get git :owner))
+                  (repo (plist-get git :repo)))
+              (when (and (stringp owner) (not (string-empty-p owner))
+                         (stringp repo) (not (string-empty-p repo)))
+                (let* ((slug (concat owner "/" repo))
+                       (cached (unless force
+                                 (project-overview--github-cache-get slug))))
+                  (if cached
+                      (progn
+                        (project-overview--github-set
+                         (car cell) (nth 0 cached) (nth 1 cached))
+                        (setq redrew t))
+                    (project-overview--github-fetch (car cell) owner repo))))))))
+      (when redrew (project-overview--redraw)))))
+
+(defun project-overview--github-slug (root)
+  "Return \"owner/repo\" for ROOT when it is a GitHub repo, else nil.
+Uses the cached git info, falling back to a fresh probe of ROOT."
+  (let ((git (or (plist-get (cdr (assoc root project-overview--cache)) :git)
+                 (project-overview--git-info root))))
+    (when (equal (plist-get git :host) "github")
+      (let ((owner (plist-get git :owner))
+            (repo (plist-get git :repo)))
+        (when (and (stringp owner) (not (string-empty-p owner))
+                   (stringp repo) (not (string-empty-p repo)))
+          (concat owner "/" repo))))))
+
+(defun project-overview--github-body (body)
+  "Convert issue/PR BODY (GitHub Markdown) to a safe Org fragment.
+Fenced ```` ``` ```` / ~~~ code blocks become Org source blocks (using
+the fence's language when given), so snippets fontify instead of
+showing raw fences.  Lines outside code are indented two spaces, which
+keeps a leading \"*\" or \"#\" from starting an Org heading or keyword
+and so prevents item bodies from breaking the buffer's outline."
+  (if (or (null body) (string-empty-p (string-trim body)))
+      ""
+    (let ((lines (split-string
+                  (replace-regexp-in-string "\r" "" (string-trim body)) "\n"))
+          (in-code nil)
+          out)
+      (dolist (line lines)
+        (cond
+         ;; Opening or closing code fence (``` or ~~~, optionally ```lang).
+         ((string-match "\\`[ \t]*\\(?:```+\\|~~~+\\)[ \t]*\\(.*\\)\\'" line)
+          (if in-code
+              (progn (push "#+end_src" out) (setq in-code nil))
+            (let ((lang (string-trim (match-string 1 line))))
+              (push (if (string-empty-p lang)
+                        "#+begin_src text"
+                      (concat "#+begin_src " lang))
+                    out)
+              (setq in-code t))))
+         ;; Verbatim inside a code block, and prose outside it, both kept
+         ;; at column 0 here; uniform indentation is applied below.
+         (t (push line out))))
+      ;; Close an unterminated fence so the block stays well-formed.
+      (when in-code (push "#+end_src" out))
+      ;; Indent every non-empty line two spaces.  This keeps a leading "*"
+      ;; or "#" from starting an Org heading/keyword and aligns the source
+      ;; blocks (which Org still recognises when indented) with the prose,
+      ;; avoiding the offset between snippets and surrounding text.
+      (concat (mapconcat (lambda (l) (if (string-empty-p l) l (concat "  " l)))
+                         (nreverse out) "\n")
+              "\n"))))
+
+(defun project-overview--github-render (kind slug items)
+  "Render ITEMS (issues or PRs) for SLUG into an Org buffer and show it.
+KIND is `issue' or `pr'; ITEMS is the parsed JSON list from gh."
+  (let* ((label (if (eq kind 'pr) "pull requests" "issues"))
+         (buf (get-buffer-create (format "*GitHub %s: %s*" label slug))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "#+title: Open %s — %s\n" label slug))
+        (insert (format "# %d open %s, fetched %s\n\n"
+                        (length items) label
+                        (format-time-string "%Y-%m-%d %H:%M")))
+        (if (null items)
+            (insert (format "No open %s.\n" label))
+          (dolist (it items)
+            (let* ((num (alist-get 'number it))
+                   (title (alist-get 'title it))
+                   (author (alist-get 'login (alist-get 'author it)))
+                   (created (alist-get 'createdAt it))
+                   (labels (delq nil (mapcar (lambda (l) (alist-get 'name l))
+                                             (alist-get 'labels it))))
+                   (url (alist-get 'url it))
+                   (draft (eq (alist-get 'isDraft it) t))
+                   (body (alist-get 'body it)))
+              (insert (format "* #%s %s%s\n" num (or title "")
+                              (if draft " [DRAFT]" "")))
+              (insert ":PROPERTIES:\n")
+              (insert (format ":AUTHOR: %s\n" (or author "")))
+              (when (and created (>= (length created) 10))
+                (insert (format ":CREATED: %s\n" (substring created 0 10))))
+              (when labels
+                (insert (format ":LABELS: %s\n" (string-join labels ", "))))
+              (insert (format ":URL: %s\n" (or url "")))
+              (insert ":END:\n")
+              (let ((b (project-overview--github-body body)))
+                (unless (string-empty-p b) (insert b)))
+              (insert "\n"))))
+        (goto-char (point-min))
+        ;; Activate Org fully (run `org-mode-hook', fontify, etc.) rather
+        ;; than `delay-mode-hooks', so headings, folding and the user's Org
+        ;; setup all take effect.
+        (org-mode)
+        (font-lock-ensure)
+        (view-mode 1)))
+    (select-window
+     (display-buffer buf '(display-buffer-in-direction (direction . right))))))
+
+(defun project-overview--github-list (kind)
+  "Fetch and display open GitHub issues or PRs for the project under point.
+KIND is the symbol `issue' or `pr'.  Runs the gh CLI synchronously."
+  (unless (executable-find "gh")
+    (user-error "The gh CLI is not installed"))
+  (let* ((root (project-overview--root))
+         (slug (or (project-overview--github-slug root)
+                   (user-error "Not a GitHub repository")))
+         (sub (if (eq kind 'pr) "pr" "issue"))
+         (fields (if (eq kind 'pr)
+                     "number,title,author,createdAt,labels,url,body,isDraft"
+                   "number,title,author,createdAt,labels,url,body")))
+    (message "Fetching open %s for %s…"
+             (if (eq kind 'pr) "pull requests" "issues") slug)
+    (with-temp-buffer
+      (if (zerop (process-file "gh" nil t nil
+                               sub "list" "-R" slug
+                               "--state" "open" "--limit" "100"
+                               "--json" fields))
+          (let ((items (ignore-errors
+                         (json-parse-string (buffer-string)
+                                            :object-type 'alist
+                                            :array-type 'list
+                                            :null-object nil))))
+            (project-overview--github-render kind slug items)
+            (message "Fetching open %s for %s…done"
+                     (if (eq kind 'pr) "pull requests" "issues") slug))
+        (user-error "gh %s list failed: %s" sub
+                    (string-trim (buffer-string)))))))
+
+(defun project-overview-github-issues ()
+  "Show the open GitHub issues for the project under point in an Org buffer."
+  (interactive)
+  (project-overview--github-list 'issue))
+
+(defun project-overview-github-prs ()
+  "Show the open GitHub pull requests for the project under point in an Org buffer."
+  (interactive)
+  (project-overview--github-list 'pr))
 
 ;;; Rendering
 
@@ -426,6 +923,23 @@ For e.g. \"git@github.com:alice/repo.git\" or
          (bugs (if (> total 0) (format "%d/%d" open total) "")))
     (if (> open 0) (propertize bugs 'face 'warning) bugs)))
 
+(defun project-overview--col-github (cell)
+  "Return open GitHub issue/PR counts for cache CELL, e.g. \"3i 1p\".
+Empty until the asynchronous fetch fills in :gh.  Zero counts are
+omitted, so a repository with no open issues or PRs shows blank; the
+counts that do appear use the `warning' face."
+  (let ((gh (plist-get (cdr cell) :gh)))
+    (if (not gh)
+        ""
+      (let* ((issues (or (car gh) 0))
+             (prs (or (cdr gh) 0))
+             (parts (delq nil
+                          (list (when (> issues 0)
+                                  (propertize (format "%di" issues) 'face 'warning))
+                                (when (> prs 0)
+                                  (propertize (format "%dp" prs) 'face 'warning))))))
+        (mapconcat #'identity parts " ")))))
+
 (defvar project-overview--columns
   (list
    (list 'name        '("Project" 24 t)
@@ -444,8 +958,12 @@ For e.g. \"git@github.com:alice/repo.git\" or
          (lambda (c) (or (plist-get (plist-get (cdr c) :git) :host) "")))
    (list 'owner       '("Owner" 16 t)
          (lambda (c) (or (plist-get (plist-get (cdr c) :git) :owner) "")))
+   (list 'github      '("GitHub" 9 t)
+         #'project-overview--col-github)
    (list 'known       '("Known" 6 t)
          (lambda (c) (if (plist-get (cdr c) :known) "✓" "")))
+   (list 'melpa       '("MELPA" 6 t)
+         (lambda (c) (if (plist-get (cdr c) :melpa) "✓" "")))
    (list 'commit      '("Commit" 17 t)
          (lambda (c) (plist-get (plist-get (cdr c) :git) :commit)))
    (list 'description '("Description" 50 t)
@@ -479,15 +997,23 @@ takes precedence over `project-overview-default-view'."
            project-overview-saved-view)
       project-overview-default-view))
 
+(defvar-local project-overview--hide-description nil
+  "When non-nil, omit the Description column whatever the active view.
+Toggled with `project-overview-toggle-description'.")
+
 (defun project-overview--view-columns ()
   "Return the list of column ids for the active view.
 Falls back to the effective default view then the `full' layout when
-the current view is unset or unknown."
-  (or (cdr (assq (or project-overview--view
-                     (project-overview--effective-default-view))
-                 project-overview-views))
-      (cdr (assq 'full project-overview-views))
-      (mapcar #'car project-overview--columns)))
+the current view is unset or unknown.  The Description column is
+dropped when `project-overview--hide-description' is set."
+  (let ((cols (or (cdr (assq (or project-overview--view
+                                 (project-overview--effective-default-view))
+                             project-overview-views))
+                  (cdr (assq 'full project-overview-views))
+                  (mapcar #'car project-overview--columns))))
+    (if project-overview--hide-description
+        (remq 'description cols)
+      cols)))
 
 (defun project-overview--format ()
   "Return the `tabulated-list-format' vector for the active view."
@@ -767,13 +1293,68 @@ The entry is shown read-only in a right-hand side window."
                             (side . right) (window-width . 0.4))))))
 
 (defun project-overview-refresh ()
-  "Re-scan all projects and redraw the dashboard."
+  "Re-scan all projects and redraw the dashboard.
+Local project data is re-read; network data (GitHub counts, the MELPA
+list) is taken from the cache while it is fresh.  Use
+`project-overview-cache-dispatch' to force a network refresh."
   (interactive)
   (message "Scanning projects…")
   (project-overview--scan)
   (when (derived-mode-p 'project-overview-mode)
     (tabulated-list-print t))
+  (project-overview--github-fetch-all)
+  (project-overview--melpa-maybe-fetch)
   (message "Scanning projects…done"))
+
+;;; Cache refresh
+
+(defun project-overview-pull-github ()
+  "Re-fetch GitHub issue/PR counts now, bypassing the cache."
+  (interactive)
+  (unless project-overview-show-github
+    (user-error "GitHub integration is disabled \
+(`project-overview-show-github')"))
+  (message "Pulling GitHub counts…")
+  (project-overview--github-fetch-all t))
+
+(defun project-overview-pull-melpa ()
+  "Re-fetch the MELPA package list now, bypassing the cache."
+  (interactive)
+  (setq project-overview--melpa-cache nil)
+  (if (> (hash-table-count (project-overview--melpa-local-names)) 0)
+      (message "MELPA available locally; melpa.org fetch not needed")
+    (message "Pulling MELPA list…")
+    (project-overview--melpa-maybe-fetch t)))
+
+(defun project-overview-pull-all ()
+  "Re-scan projects and re-fetch all cached network data now."
+  (interactive)
+  (message "Refreshing and pulling caches…")
+  (project-overview--scan)
+  (when (derived-mode-p 'project-overview-mode)
+    (tabulated-list-print t))
+  (setq project-overview--melpa-cache nil)
+  (project-overview--github-fetch-all t)
+  (project-overview--melpa-maybe-fetch t)
+  (message "Refreshing and pulling caches…done"))
+
+(defun project-overview-cache-clear ()
+  "Delete the on-disk cache, forget fetched data, and refresh."
+  (interactive)
+  (project-overview--cache-reset)
+  (message "Cache cleared")
+  (project-overview-refresh))
+
+;;;###autoload (autoload 'project-overview-cache-dispatch "project-overview" nil t)
+(transient-define-prefix project-overview-cache-dispatch ()
+  "Refresh or clear the dashboard's cached network data."
+  ["Pull (force re-fetch, bypassing the cache)"
+   ("p" "GitHub counts" project-overview-pull-github)
+   ("m" "MELPA list"    project-overview-pull-melpa)
+   ("a" "everything"    project-overview-pull-all)]
+  ["Cache"
+   ("c" "clear on-disk cache" project-overview-cache-clear)
+   ("q" "quit"                transient-quit-one)])
 
 ;;; Filtering
 
@@ -862,49 +1443,47 @@ shown/total counts and redraws."
     ("C" "CHANGELOG.org"     project-overview-changelog)
     ("b" "BUGS.org"          project-overview-bugs-file)
     ("B" "bugs agenda"       project-overview-bugs-agenda)
-    ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)]
+    ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)
+    ("i" "GitHub issues"     project-overview-github-issues)
+    ("P" "GitHub PRs"        project-overview-github-prs)]
    ["VC & search"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
     ("s" "search"            project-overview-search)]
    ["Dashboard"
-    ("/" "filter…" project-overview-filter-dispatch)
-    ("V" "view…"   project-overview-view-dispatch)
-    ("g" "refresh" project-overview-refresh :transient t)
-    ("q" "quit"    transient-quit-one)]])
+    ("/" "filter…"        project-overview-filter-dispatch)
+    ("V" "cycle view"     project-overview-cycle-view :transient t)
+    ("t" "toggle descrip" project-overview-toggle-description :transient t)
+    ("g" "refresh"        project-overview-refresh :transient t)
+    ("r" "cache / pull…"  project-overview-cache-dispatch)
+    ("q" "quit"           transient-quit-one)]])
 
-(defun project-overview-view-full ()
-  "Switch to the full layout showing every column."
+(defun project-overview-cycle-view (&optional backward)
+  "Switch to the next column layout in `project-overview-views', cycling round.
+With a prefix argument BACKWARD, cycle to the previous layout instead.
+The new view is applied, announced, and (when
+`project-overview-remember-view' is on) remembered — so repeatedly
+pressing the key steps through the layouts and stops wherever you like."
+  (interactive "P")
+  (let* ((views (mapcar #'car project-overview-views))
+         (n (length views)))
+    (when (zerop n) (user-error "No views defined in `project-overview-views'"))
+    (let* ((current (or project-overview--view
+                        (project-overview--effective-default-view)))
+           (idx (or (seq-position views current) 0))
+           (next (nth (mod (+ idx (if backward -1 1)) n) views)))
+      (project-overview-set-view next))))
+
+(defun project-overview-toggle-description ()
+  "Toggle display of the Description column in the dashboard.
+The setting applies on top of the active view, so the description can
+be hidden or shown without switching layouts."
   (interactive)
-  (project-overview-set-view 'full))
-
-(defun project-overview-view-minimal ()
-  "Switch to the minimal layout (name, version, bugs, commit, path)."
-  (interactive)
-  (project-overview-set-view 'minimal))
-
-(defun project-overview-view-status ()
-  "Switch to the status layout (name, bugs, branch, git flag, commit)."
-  (interactive)
-  (project-overview-set-view 'status))
-
-(defun project-overview-view-remote ()
-  "Switch to the remote layout (name, remote, owner, known, path)."
-  (interactive)
-  (project-overview-set-view 'remote))
-
-;;;###autoload (autoload 'project-overview-view-dispatch "project-overview" nil t)
-(transient-define-prefix project-overview-view-dispatch ()
-  "Choose a column layout for the `project-overview' dashboard."
-  [:description
-   (lambda () (format "View (now: %s)"
-                      (or project-overview--view
-                          (project-overview--effective-default-view))))
-   [("f" "full"    project-overview-view-full)]
-   [("m" "minimal" project-overview-view-minimal)]
-   [("s" "status"  project-overview-view-status)]
-   [("r" "remote"  project-overview-view-remote)]
-   [("q" "quit"    transient-quit-one)]])
+  (setq project-overview--hide-description (not project-overview--hide-description))
+  (project-overview--apply-view)
+  (tabulated-list-print t)
+  (message "Description column %s"
+           (if project-overview--hide-description "hidden" "shown")))
 
 ;;;###autoload (autoload 'project-overview-filter-dispatch "project-overview" nil t)
 (transient-define-prefix project-overview-filter-dispatch ()
@@ -927,6 +1506,21 @@ Bold only sets the weight, so the colour stays that of the surrounding
   (let ((s (format " · %d %s" n label)))
     (if (> n 0) (propertize s 'face 'bold) s)))
 
+(defun project-overview--owned-github-totals ()
+  "Return cons (ISSUES . PRS) summed over `project-overview-github-user' repos.
+Only projects whose remote owner matches the configured user and whose
+GitHub counts have been fetched contribute.  Returns (0 . 0) when the
+user is unset."
+  (let ((issues 0) (prs 0)
+        (user project-overview-github-user))
+    (when (and (stringp user) (not (string-empty-p user)))
+      (dolist (c project-overview--cache)
+        (let ((gh (plist-get (cdr c) :gh)))
+          (when (and gh (equal (plist-get (plist-get (cdr c) :git) :owner) user))
+            (setq issues (+ issues (or (car gh) 0))
+                  prs (+ prs (or (cdr gh) 0)))))))
+    (cons issues prs)))
+
 (defun project-overview--header-line ()
   "Return the aggregate status header-line for the dashboard.
 The leading counts are taken from the full project set; when a filter
@@ -937,7 +1531,6 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
          (total (length cache))
          (dirty (seq-count #'project-overview--filter-dirty cache))
          (sync  (seq-count #'project-overview--filter-out-of-sync cache))
-         (buggy (seq-count #'project-overview--filter-bugs cache))
          (open  (apply #'+ (mapcar (lambda (c) (plist-get (cdr c) :open)) cache))))
     (concat
      (propertize (format " %d project%s" total (if (= total 1) "" "s"))
@@ -945,9 +1538,23 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
      (project-overview--header-count dirty "dirty")
      (project-overview--header-count sync "out of sync")
      (project-overview--header-count
-      open (format "open bug%s%s"
-                   (if (= open 1) "" "s")
-                   (if (> buggy 0) (format " in %d" buggy) "")))
+      open (format "open bug%s" (if (= open 1) "" "s")))
+     (when (and project-overview-show-github
+                (stringp project-overview-github-user)
+                (not (string-empty-p project-overview-github-user)))
+       (let* ((gh (project-overview--owned-github-totals))
+              (issues (car gh))
+              (prs (cdr gh)))
+         (concat
+          (project-overview--header-count
+           issues (format "open issue%s" (if (= issues 1) "" "s")))
+          (project-overview--header-count
+           prs (format "open PR%s" (if (= prs 1) "" "s"))))))
+     (concat " · view: "
+             (propertize (symbol-name (or project-overview--view
+                                          (project-overview--effective-default-view)))
+                         'face 'bold)
+             (if project-overview--hide-description " (no desc)" ""))
      (when project-overview--filter
        (let ((shown (seq-count (cdr project-overview--filter) cache)))
          (propertize (format "    ⦅ filter: %s — %d shown ⦆"
@@ -984,9 +1591,13 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
     (define-key map "b" #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
+    (define-key map "i" #'project-overview-github-issues)
+    (define-key map "P" #'project-overview-github-prs)
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
-    (define-key map "V" #'project-overview-view-dispatch)
+    (define-key map "V" #'project-overview-cycle-view)
+    (define-key map "t" #'project-overview-toggle-description)
+    (define-key map "r" #'project-overview-cache-dispatch)
     (define-key map "g" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
@@ -1005,6 +1616,9 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
   ;; most recently committed projects first when the Commit column is shown.
   (project-overview--apply-view)
   (setq header-line-format '(:eval (project-overview--header-line)))
+  ;; Highlight the current row in this buffer only, regardless of whether
+  ;; `global-hl-line-mode' is enabled elsewhere.
+  (hl-line-mode 1)
   ;; Show the full path of the project under point at the end of the mode line.
   (setq-local mode-line-format
               (append mode-line-format
@@ -1025,6 +1639,8 @@ weight (bold) is used for emphasis, so the whole line keeps the theme's
       (while (and (not (eobp)) (not (tabulated-list-get-id)))
         (forward-line 1)))
     (pop-to-buffer-same-window buf))
+  (project-overview--github-fetch-all)
+  (project-overview--melpa-maybe-fetch)
   (message "Scanning projects…done"))
 
 ;;; Persistence

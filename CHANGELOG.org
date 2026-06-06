@@ -2,10 +2,17 @@
 
 * [0.3.0] - 2026-06-05
 ** Added
+- ~GitHub~ column: open issue and PR counts (e.g. ~3i 1p~) for GitHub-hosted repositories, fetched asynchronously via the ~gh~ CLI so the dashboard stays responsive and rows fill in once the queries return.  Requires ~gh~ to be installed and authenticated; toggle with ~project-overview-show-github~.
+- ~i~ (~project-overview-github-issues~) and ~P~ (~project-overview-github-prs~): open the project's open GitHub issues or pull requests in an Org buffer — one heading per item with author, creation date, labels, URL, and the body — for a quick look at what they are.
+- ~MELPA~ column: ~✓~ when a package matching the project's directory name is available from MELPA, checked locally against ~package-archive-contents~.  When no local MELPA contents are present, falls back (if ~project-overview-melpa-fallback~ is on) to fetching the package list from melpa.org once per session, asynchronously, so the column fills in shortly after.
+- Persistent caching of network data: the MELPA package list and per-repository GitHub issue/PR counts are now cached on disk (~project-overview-cache-file~) with a ~project-overview-cache-ttl~ lifetime (default 1 day), surviving restarts so an ordinary refresh (~g~) reuses fresh data instead of re-hitting the network.
+- ~r~ (~project-overview-cache-dispatch~): a transient to force-pull fresh GitHub counts, the MELPA list, or everything, and to clear the on-disk cache.
+- ~t~ (~project-overview-toggle-description~): quickly hide or show the ~Description~ column on top of the active view, without switching layouts.
 - ~Path~ column: the project's root directory (abbreviated, e.g. ~~/source/repos/foo~).
-- Selectable column layouts (views): ~V~ (~project-overview-view-dispatch~) switches between ~full~ (every column), ~minimal~, ~status~ (branch/git/bugs), and ~remote~ (forge/owner).  Layouts are defined in ~project-overview-views~ and the opening layout in ~project-overview-default-view~.
+- Selectable column layouts (views): ~V~ (~project-overview-cycle-view~) steps through ~full~ (every column), ~minimal~, ~status~ (branch/git/bugs), and ~remote~ (forge/owner) one press at a time, wrapping round (a prefix argument cycles backwards).  Layouts are defined in ~project-overview-views~ and the opening layout in ~project-overview-default-view~.
 - The view chosen with ~V~ is remembered across sessions via ~savehist~ (~project-overview-saved-view~), taking precedence over ~project-overview-default-view~; toggle with ~project-overview-remember-view~.
 ** Changed
+- Header line: the open-bug count no longer appends "in N" (just the number of open bugs), and it now also shows the total open GitHub issues and pull requests across the repositories owned by ~project-overview-github-user~ (default "captainflasmr").
 - Columns are now data-driven (~project-overview--columns~): the active view selects which appear and in what order, keeping the header and rows in sync.
 - The ~?~ dispatch now lays the ~Dashboard~ group on the same row as ~Find~, ~Inspect~, and ~VC & search~; ~V~ (view) was added to it.
 
