@@ -985,7 +985,11 @@ face."
 (defvar project-overview--columns
   (list
    (list 'name        '("Project" 24 t)
-         (lambda (c) (plist-get (cdr c) :name)))
+         (lambda (c)
+           (let ((name (plist-get (cdr c) :name)))
+             (if (project-overview--filter-dirty c)
+                 (propertize name 'face 'bold)
+               name))))
    (list 'version     '("Version" 9 t)
          (lambda (c) (plist-get (cdr c) :version)))
    (list 'changelog   '("ChangeLog" 12 t)
@@ -1132,6 +1136,50 @@ VIEW is a key of `project-overview-views'."
 (defun project-overview--root ()
   "Return the project root for the current dashboard line."
   (or (tabulated-list-get-id) (user-error "No project on this line")))
+
+(defun project-overview--row-dirty-p ()
+  "Return non-nil when the dashboard row at point is a git-dirty project."
+  (let* ((root (tabulated-list-get-id))
+         (cell (and root (assoc root project-overview--cache))))
+    (and cell (project-overview--filter-dirty cell))))
+
+(defun project-overview--dirty-positions ()
+  "Return line-start buffer positions of all git-dirty project rows."
+  (let (positions)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when (project-overview--row-dirty-p)
+          (push (line-beginning-position) positions))
+        (forward-line 1)))
+    (nreverse positions)))
+
+(defun project-overview--goto-dirty (forward)
+  "Move point to the next git-dirty project row, wrapping around.
+When FORWARD is non-nil move downward, otherwise upward."
+  (let* ((positions (project-overview--dirty-positions))
+         (cur (line-beginning-position))
+         (target
+          (if forward
+              (or (seq-find (lambda (p) (> p cur)) positions)
+                  (car positions))
+            (or (seq-find (lambda (p) (< p cur)) (reverse positions))
+                (car (last positions))))))
+    (unless target (user-error "No dirty projects"))
+    (goto-char target)
+    (message "Dirty: %s"
+             (file-name-nondirectory
+              (directory-file-name (tabulated-list-get-id))))))
+
+(defun project-overview-next-dirty ()
+  "Move point to the next git-dirty project, wrapping at the bottom."
+  (interactive)
+  (project-overview--goto-dirty t))
+
+(defun project-overview-previous-dirty ()
+  "Move point to the previous git-dirty project, wrapping at the top."
+  (interactive)
+  (project-overview--goto-dirty nil))
 
 (defun project-overview-open ()
   "Switch to the project under point via `project-switch-project'."
@@ -1711,6 +1759,8 @@ screen), and the filter name is appended."
     ;; Ergonomic column navigation (the inherited bindings are M-left/right).
     (define-key map (kbd "TAB") #'tabulated-list-next-column)
     (define-key map (kbd "<backtab>") #'tabulated-list-previous-column)
+    (define-key map (kbd "M-n") #'project-overview-next-dirty)
+    (define-key map (kbd "M-p") #'project-overview-previous-dirty)
     (define-key map "g" #'project-overview-refresh)
     (define-key map "?" #'project-overview-dispatch)
     map)
