@@ -73,6 +73,7 @@ the same keys as the =project-switch-project= menu:
 | =m=         | =magit-status=                               |
 | =D=         | dired at root                                |
 | =!=         | shell at root                                |
+| =.=         | detail card in a window to the right         |
 | =c=         | preview latest =CHANGELOG.org= entry          |
 | =C=         | open =CHANGELOG.org= in a window to the right  |
 | =b=         | open =BUGS.org= in a window to the right      |
@@ -104,6 +105,34 @@ with =/ /= when done.
 
 Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
 same actions grouped into columns, headed by the project under point.
+
+* Detail card
+
+Press =.= (=project-overview-show-detail=) to open a per-project "card" in
+a window to the right — an Org buffer that gathers everything the
+dashboard knows about the project under point into one place:
+
+- status: version and changelog date, branch and git state, last commit,
+  remote (host / owner / repo), known-projects and MELPA flags, open
+  GitHub issue/PR counts (when fetched), and the README description;
+- the open =BUGS.org= headings; and
+- the ten most recent commits.
+
+It reuses the already-scanned data, so it is near-instant — handy for a
+quick "what is going on with this repo?" without switching to it.
+
+* Scanning
+
+By default the dashboard scans *incrementally*: it appears immediately
+and fills each project's git/CHANGELOG/BUGS data in a few-at-a-time on a
+short timer, so Emacs stays responsive even with dozens of repositories.
+A =scanning N/M= indicator shows in the header line while this runs, and
+rows keep the previous scan's values until they are re-probed.
+
+- =project-overview-async-scan= :: non-nil (default) for incremental
+  scanning; nil for a single blocking pass.
+- =project-overview-async-batch-size= :: projects processed per timer tick
+  (default 4) — larger finishes sooner but yields to input less often.
 
 * Installation
 

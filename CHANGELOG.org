@@ -1,5 +1,10 @@
 #+TITLE: Changelog for project-overview
 
+* [0.5.0] - 2026-06-10
+** Added
+- Incremental (asynchronous) scanning: the dashboard now draws immediately and refreshes each project's git/CHANGELOG/BUGS data a batch at a time on a short timer, so Emacs stays responsive while a large set of repositories is scanned.  Rows reuse the previous scan's data until each project is re-probed, and a ~scanning N/M~ indicator appears in the header line.  Controlled by ~project-overview-async-scan~ (default on) and ~project-overview-async-batch-size~ (default 4); set the former to nil for the old single-pass synchronous scan.
+- ~.~ (~project-overview-show-detail~): open a detail "card" for the project under point in a window to the right — an Org buffer summarising its status (version, branch and git state, remote, bug counts, GitHub issue/PR counts when fetched, and description) plus the open bug headings and the ten most recent commits.  Reuses the scanned cache, so it is near-instant.
+
 * [0.4.0] - 2026-06-10
 ** Added
 - ~Last Commit~ column: the subject (first line) of the most recent commit message, sitting alongside the existing ~Commit~ date column.  Included in the ~full~ and ~status~ views.

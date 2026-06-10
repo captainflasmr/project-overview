@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.4.0
-;; Package-Version: 0.4.0
+;; Version: 0.5.0
+;; Package-Version: 0.5.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -59,17 +59,18 @@
 ;; Keys mirroring the `project-switch-project' menu act on the project
 ;; under point:
 ;;
-;;   RET / o  switch to project        c  preview latest CHANGELOG entry
-;;   f        find file                C  open CHANGELOG.org (window right)
-;;   G        find regexp              R  open README (window right)
-;;   d        find directory           b  open BUGS.org (window right)
-;;   e        eshell                   B  TODO agenda for this project's bugs
-;;   s        search (ripgrep)         A  TODO agenda for all projects' bugs
-;;   v        vc-dir                   /  filter the view (transient)
-;;   m        magit-status             g  refresh (re-scan)
-;;   D        dired at root            r  cache / pull (transient)
-;;   !        shell at root            ?  transient menu of all actions
-;;   w        browse remote in browser V  cycle column layout
+;;   RET / o  switch to project        .  detail card (window right)
+;;   f        find file                c  preview latest CHANGELOG entry
+;;   G        find regexp              C  open CHANGELOG.org (window right)
+;;   d        find directory           R  open README (window right)
+;;   e        eshell                   b  open BUGS.org (window right)
+;;   s        search (ripgrep)         B  TODO agenda for this project's bugs
+;;   v        vc-dir                   A  TODO agenda for all projects' bugs
+;;   m        magit-status             /  filter the view (transient)
+;;   D        dired at root            g  refresh (re-scan)
+;;   !        shell at root            r  cache / pull (transient)
+;;   w        browse remote in browser ?  transient menu of all actions
+;;                                     V  cycle column layout
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
@@ -92,6 +93,14 @@
 ;; unless `project-overview-remember-view' is nil, the last view chosen
 ;; with `V' is remembered via `savehist' and reused as the opening
 ;; layout in the next session.
+;;
+;; By default the local scan is incremental (`project-overview-async-scan'):
+;; the dashboard appears at once and each project's git/CHANGELOG/BUGS data
+;; is refreshed a batch at a time on a short timer, so Emacs stays
+;; responsive across many repositories; a `scanning N/M' indicator shows in
+;; the header line meanwhile.  `.' (`project-overview-show-detail') opens a
+;; per-project detail card — status, open bugs and recent commits — in a
+;; window to the right, reusing the scanned data.
 ;;
 ;; Network data — the MELPA package list and per-repository GitHub
 ;; issue/PR counts — is cached on disk in `project-overview-cache-file'
@@ -256,10 +265,53 @@ the opening layout next time."
   :type 'boolean
   :group 'project-overview)
 
+(defcustom project-overview-async-scan t
+  "When non-nil, scan projects incrementally instead of all at once.
+The dashboard is drawn immediately (reusing the previous scan's data
+for projects not yet re-probed) and each project's git/CHANGELOG/BUGS
+data is refreshed a batch at a time on a short timer, so Emacs stays
+responsive while a large set of repositories is scanned.  Set to nil to
+scan everything synchronously in one (blocking) pass."
+  :type 'boolean
+  :group 'project-overview)
+
+(defcustom project-overview-async-batch-size 4
+  "Number of projects processed per tick during an asynchronous scan.
+Larger values finish sooner but yield to user input less often.  Only
+used when `project-overview-async-scan' is non-nil."
+  :type 'integer
+  :group 'project-overview)
+
 ;;; Internal state
 
 (defvar project-overview--cache nil
   "Alist of (ROOT . PLIST) holding scanned project data for the dashboard.")
+
+(defvar project-overview--scan-timer nil
+  "Timer driving the in-flight asynchronous scan, or nil when idle.")
+
+(defvar project-overview--scan-queue nil
+  "Project roots still awaiting probing in the current asynchronous scan.")
+
+(defvar project-overview--scan-acc nil
+  "Cache cells produced so far by the current asynchronous scan.")
+
+(defvar project-overview--scan-old nil
+  "Snapshot of `project-overview--cache' taken when the async scan began.
+Cells for not-yet-rescanned roots are shown from here so existing rows
+do not vanish mid-scan.")
+
+(defvar project-overview--scan-known nil
+  "Known-roots hash captured for the duration of an async scan.")
+
+(defvar project-overview--scan-melpa nil
+  "MELPA package-name set captured for the duration of an async scan.")
+
+(defvar project-overview--scan-total 0
+  "Number of projects in the current async scan, for progress reporting.")
+
+(defvar project-overview--scan-force nil
+  "Non-nil to force a network refresh when the current async scan finishes.")
 
 (defvar-local project-overview--filter nil
   "Active dashboard filter, or nil to show every project.
@@ -532,6 +584,30 @@ Parses the first \"** <date> *version*\" heading.  Returns nil if absent."
             (setq open (1+ open))))))
     (cons open total)))
 
+(defun project-overview--open-bug-titles (root)
+  "Return a list of \"KEYWORD  Title\" strings for ROOT's open bugs.
+Reads TODO/DOING headings from ROOT's BUGS.org; empty when the file is
+absent or has none."
+  (let ((file (expand-file-name "BUGS.org" root))
+        items)
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "^\\*+ +\\(TODO\\|DOING\\)\\b *\\(.*\\)$" nil t)
+          (push (format "%s  %s" (match-string 1)
+                        (string-trim (match-string 2)))
+                items))))
+    (nreverse items)))
+
+(defun project-overview--recent-commits (root &optional n)
+  "Return a list of recent one-line commit strings for ROOT (default N=10).
+Each entry is \"YYYY-MM-DD  subject\"; nil when ROOT is not a git repo."
+  (let ((out (project-overview--git root "log" (format "-%d" (or n 10))
+                                    "--date=short" "--pretty=format:%cd  %s")))
+    (when (and out (not (string-empty-p out)))
+      (split-string out "\n" t))))
+
 (defun project-overview--prose-line-p (line)
   "Non-nil if LINE looks like README prose rather than markup."
   (not (or (string-empty-p line)
@@ -679,28 +755,119 @@ Keys: :branch :dirty :commit :subject :ahead :behind :host :owner :repo."
           :ahead (or ahead 0) :behind (or behind 0)
           :host host :owner owner :repo repo)))
 
+(defun project-overview--scan-cell (root known melpa)
+  "Build and return the cache cell (ROOT . PLIST) for project ROOT.
+KNOWN and MELPA are the lookup tables from `project-overview--known-roots'
+and `project-overview--melpa-names'.  This probes git and reads the
+project's CHANGELOG/BUGS/README, so it is the slow part of a scan."
+  (let* ((cl (project-overview--changelog root))
+         (bugs (project-overview--bugs root))
+         (git (project-overview--git-info root))
+         (name (file-name-nondirectory (directory-file-name root))))
+    (cons root
+          (list :name name
+                :version (or (car cl) "")
+                :changed (or (cdr cl) "")
+                :open (car bugs)
+                :total (cdr bugs)
+                :desc (project-overview--description root)
+                :known (and (gethash root known) t)
+                :melpa (and (gethash (intern name) melpa) t)
+                :git git))))
+
 (defun project-overview--scan ()
-  "Scan all discovered projects and populate `project-overview--cache'."
+  "Scan all discovered projects synchronously into `project-overview--cache'."
   (let ((known (project-overview--known-roots))
         (melpa (project-overview--melpa-names)))
     (setq project-overview--cache
-          (mapcar
-           (lambda (root)
-             (let* ((cl (project-overview--changelog root))
-                    (bugs (project-overview--bugs root))
-                    (git (project-overview--git-info root))
-                    (name (file-name-nondirectory (directory-file-name root))))
-               (cons root
-                     (list :name name
-                           :version (or (car cl) "")
-                           :changed (or (cdr cl) "")
-                           :open (car bugs)
-                           :total (cdr bugs)
-                           :desc (project-overview--description root)
-                           :known (and (gethash root known) t)
-                           :melpa (and (gethash (intern name) melpa) t)
-                           :git git))))
-           (project-overview--discover)))))
+          (mapcar (lambda (root) (project-overview--scan-cell root known melpa))
+                  (project-overview--discover)))))
+
+;;; Asynchronous (incremental) scanning
+
+(defun project-overview--scan-active-p ()
+  "Non-nil while an asynchronous scan is in progress."
+  (and project-overview--scan-timer t))
+
+(defun project-overview--scan-cancel ()
+  "Cancel any in-flight asynchronous scan, leaving the cache as-is."
+  (when (timerp project-overview--scan-timer)
+    (cancel-timer project-overview--scan-timer))
+  (setq project-overview--scan-timer nil
+        project-overview--scan-queue nil
+        project-overview--scan-acc nil
+        project-overview--scan-old nil))
+
+(defun project-overview--scan-merge ()
+  "Set `project-overview--cache' from scanned cells plus pending old ones.
+Freshly scanned cells take precedence; roots still queued keep their
+cell from `project-overview--scan-old' so their row stays on screen."
+  (let ((done (mapcar #'car project-overview--scan-acc)))
+    (setq project-overview--cache
+          (append (reverse project-overview--scan-acc)
+                  (seq-remove (lambda (c) (member (car c) done))
+                              project-overview--scan-old)))))
+
+(defun project-overview--scan-step ()
+  "Process one batch of the asynchronous scan and reschedule or finish."
+  (setq project-overview--scan-timer nil)
+  (let ((n 0))
+    (while (and project-overview--scan-queue
+                (< n (max 1 project-overview-async-batch-size)))
+      (let ((root (pop project-overview--scan-queue)))
+        (push (project-overview--scan-cell root
+                                           project-overview--scan-known
+                                           project-overview--scan-melpa)
+              project-overview--scan-acc))
+      (setq n (1+ n))))
+  (project-overview--scan-merge)
+  (project-overview--redraw)
+  (if project-overview--scan-queue
+      (progn
+        (let ((done (- project-overview--scan-total
+                       (length project-overview--scan-queue))))
+          (message "Scanning projects… %d/%d"
+                   done project-overview--scan-total))
+        (setq project-overview--scan-timer
+              (run-with-timer 0.02 nil #'project-overview--scan-step)))
+    ;; Finished: lock in the fresh cache and kick off the network fetches.
+    (let ((force project-overview--scan-force))
+      (setq project-overview--cache (reverse project-overview--scan-acc))
+      (project-overview--scan-cancel)
+      (project-overview--redraw)
+      (message "Scanning projects…done (%d)" project-overview--scan-total)
+      (project-overview--github-fetch-all force)
+      (project-overview--melpa-maybe-fetch force))))
+
+(defun project-overview--scan-async (&optional force)
+  "Start (or restart) an incremental scan of all discovered projects.
+Rows appear immediately, reusing the previous scan's data until each
+project is re-probed.  When the scan completes the GitHub and MELPA
+fetches run, forced when FORCE is non-nil."
+  (project-overview--scan-cancel)
+  (setq project-overview--scan-known (project-overview--known-roots)
+        project-overview--scan-melpa (project-overview--melpa-names)
+        project-overview--scan-old   project-overview--cache
+        project-overview--scan-queue (project-overview--discover)
+        project-overview--scan-total (length project-overview--scan-queue)
+        project-overview--scan-acc   nil
+        project-overview--scan-force force)
+  (if (null project-overview--scan-queue)
+      (progn
+        (setq project-overview--cache nil)
+        (project-overview--redraw))
+    (project-overview--scan-step)))
+
+(defun project-overview--rescan (&optional force)
+  "Re-scan projects, asynchronously when `project-overview-async-scan'.
+With FORCE, force the follow-up GitHub/MELPA network fetches.  Redraws
+the dashboard and (in the synchronous path) triggers the fetches."
+  (if project-overview-async-scan
+      (project-overview--scan-async force)
+    (project-overview--scan)
+    (project-overview--redraw)
+    (project-overview--github-fetch-all force)
+    (project-overview--melpa-maybe-fetch force)))
 
 ;;; GitHub integration
 
@@ -1295,6 +1462,94 @@ Looks for README.org, README.md, README.rst, README.txt or README."
      (display-buffer (find-file-noselect f)
                      '(display-buffer-in-direction (direction . right))))))
 
+(defun project-overview--detail-git-line (git)
+  "Return a one-line human summary of the GIT status plist."
+  (let* ((branch (or (plist-get git :branch) ""))
+         (flag (project-overview--git-flag git))
+         (ahead (or (plist-get git :ahead) 0))
+         (behind (or (plist-get git :behind) 0)))
+    (concat (if (string-empty-p branch) "(detached)" branch)
+            (cond ((not (string-empty-p flag)) (concat " " flag))
+                  ((and (zerop ahead) (zerop behind)) " (clean)")
+                  (t "")))))
+
+(defun project-overview-show-detail ()
+  "Show a detail \"card\" for the project under point in a side window.
+Summarises the cached status — version, branch and git state, remote,
+bug counts, GitHub issue/PR counts (when fetched) and description — and
+adds the open bug headings and the ten most recent commits.  Reuses the
+scanned cache; the only fresh work is a couple of cheap local reads."
+  (interactive)
+  (let* ((root (project-overview--root))
+         (cell (assoc root project-overview--cache))
+         (p (cdr cell))
+         (git (plist-get p :git))
+         (name (or (plist-get p :name)
+                   (file-name-nondirectory (directory-file-name root))))
+         (web (project-overview--remote-web-url
+               (project-overview--remote-url root)))
+         (gh (plist-get p :gh))
+         (open-bugs (project-overview--open-bug-titles root))
+         (commits (project-overview--recent-commits root 10))
+         (buf (get-buffer-create (format "*Project: %s*" name))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "#+title: %s\n" name))
+        (insert (format "# %s\n\n" (abbreviate-file-name
+                                    (directory-file-name root))))
+        (let ((desc (plist-get p :desc)))
+          (when (and desc (not (string-empty-p desc)))
+            (insert desc "\n\n")))
+        (insert "* Status\n")
+        (insert ":PROPERTIES:\n")
+        (insert (format ":VERSION:  %s%s\n"
+                        (let ((v (plist-get p :version)))
+                          (if (and v (not (string-empty-p v))) v "—"))
+                        (let ((d (plist-get p :changed)))
+                          (if (and d (not (string-empty-p d)))
+                              (format "  (%s)" d) ""))))
+        (when git
+          (insert (format ":BRANCH:   %s\n"
+                          (project-overview--detail-git-line git)))
+          (let ((commit (plist-get git :commit))
+                (subject (plist-get git :subject)))
+            (when (and commit (not (string-empty-p commit)))
+              (insert (format ":COMMIT:   %s%s\n" commit
+                              (if (and subject (not (string-empty-p subject)))
+                                  (format "  %s" subject) "")))))
+          (let ((host (plist-get git :host))
+                (owner (plist-get git :owner))
+                (repo (plist-get git :repo)))
+            (when (and host (not (string-empty-p host)))
+              (insert (format ":REMOTE:   %s  %s/%s\n" host
+                              (or owner "?") (or repo "?"))))))
+        (insert (format ":BUGS:     %d open / %d total\n"
+                        (or (plist-get p :open) 0)
+                        (or (plist-get p :total) 0)))
+        (when gh
+          (insert (format ":GITHUB:   %d issues, %d PRs\n"
+                          (or (car gh) 0) (or (cdr gh) 0))))
+        (insert (format ":KNOWN:    %s\n" (if (plist-get p :known) "yes" "no")))
+        (insert (format ":MELPA:    %s\n" (if (plist-get p :melpa) "yes" "no")))
+        (when web (insert (format ":URL:      %s\n" web)))
+        (insert ":END:\n\n")
+        (insert (format "* Open bugs (%d)\n" (length open-bugs)))
+        (if open-bugs
+            (dolist (b open-bugs) (insert "- " b "\n"))
+          (insert "None.\n"))
+        (insert "\n")
+        (insert (format "* Recent commits (%d)\n" (length commits)))
+        (if commits
+            (dolist (c commits) (insert "- " c "\n"))
+          (insert "No commits.\n"))
+        (goto-char (point-min))
+        (org-mode)
+        (font-lock-ensure)
+        (view-mode 1)))
+    (select-window
+     (display-buffer buf '(display-buffer-in-direction (direction . right))))))
+
 ;;; Bugs agenda (single project and all projects)
 
 (defun project-overview--bugs-files ()
@@ -1436,12 +1691,9 @@ list) is taken from the cache while it is fresh.  Use
 `project-overview-cache-dispatch' to force a network refresh."
   (interactive)
   (message "Scanning projects…")
-  (project-overview--scan)
-  (when (derived-mode-p 'project-overview-mode)
-    (tabulated-list-print t))
-  (project-overview--github-fetch-all)
-  (project-overview--melpa-maybe-fetch)
-  (message "Scanning projects…done"))
+  (project-overview--rescan)
+  (unless project-overview-async-scan
+    (message "Scanning projects…done")))
 
 ;;; Cache refresh
 
@@ -1467,13 +1719,10 @@ list) is taken from the cache while it is fresh.  Use
   "Re-scan projects and re-fetch all cached network data now."
   (interactive)
   (message "Refreshing and pulling caches…")
-  (project-overview--scan)
-  (when (derived-mode-p 'project-overview-mode)
-    (tabulated-list-print t))
   (setq project-overview--melpa-cache nil)
-  (project-overview--github-fetch-all t)
-  (project-overview--melpa-maybe-fetch t)
-  (message "Refreshing and pulling caches…done"))
+  (project-overview--rescan t)
+  (unless project-overview-async-scan
+    (message "Refreshing and pulling caches…done")))
 
 (defun project-overview-cache-clear ()
   "Delete the on-disk cache, forget fetched data, and refresh."
@@ -1602,6 +1851,7 @@ shown/total counts and redraws."
     ("D" "dired"             project-overview-dired)
     ("!" "shell"             project-overview-shell)]
    ["Inspect"
+    ("." "detail card"       project-overview-show-detail)
     ("c" "preview changelog" project-overview-changelog-preview)
     ("C" "CHANGELOG.org"     project-overview-changelog)
     ("R" "README"            project-overview-readme)
@@ -1719,7 +1969,14 @@ screen), and the filter name is appended."
           (project-overview--header-count (car gh) "iss")
           (project-overview--header-count (cdr gh) "PR"))))
      (when project-overview--filter
-       (format " ⦅%s⦆" (car project-overview--filter))))))
+       (format " ⦅%s⦆" (car project-overview--filter)))
+     (when (project-overview--scan-active-p)
+       (propertize
+        (format " · scanning %d/%d"
+                (- project-overview--scan-total
+                   (length project-overview--scan-queue))
+                project-overview--scan-total)
+        'face 'shadow)))))
 
 (defun project-overview--path-mode-line ()
   "Return the abbreviated path of the project under point for the mode line."
@@ -1750,6 +2007,7 @@ screen), and the filter name is appended."
     (define-key map "c" #'project-overview-changelog-preview)
     (define-key map "C" #'project-overview-changelog)
     (define-key map "R" #'project-overview-readme)
+    (define-key map "." #'project-overview-show-detail)
     (define-key map "b" #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
@@ -1791,14 +2049,20 @@ screen), and the filter name is appended."
   ;; Show the full path of the project under point at the end of the mode line.
   (setq-local mode-line-format
               (append mode-line-format
-                      '((:eval (project-overview--path-mode-line))))))
+                      '((:eval (project-overview--path-mode-line)))))
+  ;; Stop any in-flight incremental scan if the dashboard is killed.
+  (add-hook 'kill-buffer-hook #'project-overview--scan-cancel nil t))
 
 ;;;###autoload
 (defun project-overview ()
   "Open the project dashboard: a table of git projects with status and actions."
   (interactive)
   (message "Scanning projects…")
-  (project-overview--scan)
+  ;; In the synchronous path the cache must be built before the first
+  ;; print; in the async path the buffer is set up first so the
+  ;; incremental redraws have a live dashboard to paint into.
+  (unless project-overview-async-scan
+    (project-overview--scan))
   (let ((buf (get-buffer-create project-overview-buffer-name)))
     (with-current-buffer buf
       (project-overview-mode)
@@ -1808,9 +2072,11 @@ screen), and the filter name is appended."
       (while (and (not (eobp)) (not (tabulated-list-get-id)))
         (forward-line 1)))
     (pop-to-buffer-same-window buf))
-  (project-overview--github-fetch-all)
-  (project-overview--melpa-maybe-fetch)
-  (message "Scanning projects…done"))
+  (if project-overview-async-scan
+      (project-overview--rescan)
+    (project-overview--github-fetch-all)
+    (project-overview--melpa-maybe-fetch)
+    (message "Scanning projects…done")))
 
 ;;; Persistence
 
