@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.3.0
-;; Package-Version: 0.3.0
+;; Version: 0.4.0
+;; Package-Version: 0.4.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -79,7 +79,7 @@
 ;; repos owned by `project-overview-github-user', repos available on
 ;; MELPA, or a name regexp.  The active filter and shown/total count
 ;; appear in the mode line, and survive a refresh until cleared with
-;; `/ a'.
+;; `/ /'.
 ;;
 ;; `project-overview-dispatch' (bound to ? in the dashboard) presents the
 ;; same actions as a transient menu, headed by the project under point.
@@ -220,9 +220,9 @@ force a re-fetch regardless."
 
 (defcustom project-overview-views
   '((full    . (name version changelog bugs branch git remote owner github known
-                     melpa commit description path))
+                     melpa commit subject description path))
     (minimal . (name version bugs commit path))
-    (status  . (name bugs branch git github commit))
+    (status  . (name bugs branch git github commit subject))
     (remote  . (name remote owner github known melpa path)))
   "Named column layouts for the dashboard.
 Each entry is (NAME . COLUMNS) where COLUMNS is a list of column ids
@@ -654,7 +654,7 @@ strips any trailing \".git\"."
 
 (defun project-overview--git-info (root)
   "Return a git status plist for ROOT.
-Keys: :branch :dirty :commit :ahead :behind :host :owner :repo."
+Keys: :branch :dirty :commit :subject :ahead :behind :host :owner :repo."
   (let* ((branch (or (project-overview--git root "symbolic-ref" "--short" "HEAD")
                      (project-overview--git root "rev-parse" "--short" "HEAD")
                      ""))
@@ -663,6 +663,8 @@ Keys: :branch :dirty :commit :ahead :behind :host :owner :repo."
          (commit (or (project-overview--git root "log" "-1" "--format=%cd"
                                             "--date=format:%Y-%m-%d %H:%M")
                      ""))
+         (subject (or (project-overview--git root "log" "-1" "--format=%s")
+                      ""))
          (ab (project-overview--git root "rev-list" "--left-right" "--count"
                                     "HEAD...@{u}"))
          (url (project-overview--remote-url root))
@@ -673,7 +675,7 @@ Keys: :branch :dirty :commit :ahead :behind :host :owner :repo."
     (when (and ab (string-match "\\([0-9]+\\)[ \t]+\\([0-9]+\\)" ab))
       (setq ahead (string-to-number (match-string 1 ab))
             behind (string-to-number (match-string 2 ab))))
-    (list :branch branch :dirty dirty :commit commit
+    (list :branch branch :dirty dirty :commit commit :subject subject
           :ahead (or ahead 0) :behind (or behind 0)
           :host host :owner owner :repo repo)))
 
@@ -990,28 +992,30 @@ face."
              (if (project-overview--filter-dirty c)
                  (propertize name 'face 'bold)
                name))))
-   (list 'version     '("Version" 9 t)
+   (list 'version     '("Version" 8 t)
          (lambda (c) (plist-get (cdr c) :version)))
-   (list 'changelog   '("ChangeLog" 12 t)
+   (list 'changelog   '("ChangeLog" 11 t)
          (lambda (c) (plist-get (cdr c) :changed)))
-   (list 'bugs        '("Bugs" 7 t)
+   (list 'bugs        '("Bugs" 6 t)
          #'project-overview--col-bugs)
-   (list 'branch      '("Branch" 14 t)
+   (list 'branch      '("Branch" 12 t)
          (lambda (c) (plist-get (plist-get (cdr c) :git) :branch)))
-   (list 'git         '("Git" 6 t)
+   (list 'git         '("Git" 5 t)
          (lambda (c) (project-overview--git-flag (plist-get (cdr c) :git))))
-   (list 'remote      '("Remote" 10 t)
+   (list 'remote      '("Remote" 9 t)
          (lambda (c) (or (plist-get (plist-get (cdr c) :git) :host) "")))
-   (list 'owner       '("Owner" 16 t)
+   (list 'owner       '("Owner" 14 t)
          (lambda (c) (or (plist-get (plist-get (cdr c) :git) :owner) "")))
-   (list 'github      '("GitHub" 9 t)
+   (list 'github      '("GitHub" 8 t)
          #'project-overview--col-github)
-   (list 'known       '("Known" 6 t)
+   (list 'known       '("K" 2 t)
          (lambda (c) (if (plist-get (cdr c) :known) "✓" "")))
-   (list 'melpa       '("MELPA" 6 t)
+   (list 'melpa       '("M" 2 t)
          (lambda (c) (if (plist-get (cdr c) :melpa) "✓" "")))
    (list 'commit      '("Commit" 17 t)
          (lambda (c) (plist-get (plist-get (cdr c) :git) :commit)))
+   (list 'subject     '("Last Commit" 40 t)
+         (lambda (c) (or (plist-get (plist-get (cdr c) :git) :subject) "")))
    (list 'description '("Description" 50 t)
          (lambda (c) (propertize (plist-get (cdr c) :desc) 'face 'shadow)))
    (list 'path        '("Path" 50 t)
@@ -1657,7 +1661,7 @@ be hidden or shown without switching layouts."
    ("m" "on MELPA"                    project-overview-filter-melpa)
    ("n" "matching a name regexp…"     project-overview-filter-name)]
   ["Filter"
-   ("a" "all (clear filter)"          project-overview-filter-clear)
+   ("/" "all (clear filter)"          project-overview-filter-clear)
    ("q" "quit"                        transient-quit-one)])
 
 ;;; Header line

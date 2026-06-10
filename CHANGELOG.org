@@ -1,5 +1,12 @@
 #+TITLE: Changelog for project-overview
 
+* [0.4.0] - 2026-06-10
+** Added
+- ~Last Commit~ column: the subject (first line) of the most recent commit message, sitting alongside the existing ~Commit~ date column.  Included in the ~full~ and ~status~ views.
+** Changed
+- Tightened column widths across the board to fit more on screen: the single-character ~Known~ and ~MELPA~ columns are now headed ~K~ and ~M~, and ~Version~, ~ChangeLog~, ~Bugs~, ~Branch~, ~Git~, ~Remote~, ~Owner~, and ~GitHub~ were each trimmed to hug their content.
+- The filter transient now clears the active filter with ~/ /~ instead of ~/ a~.
+
 * [0.3.0] - 2026-06-05
 ** Added
 - ~GitHub~ column: open issue and PR counts (e.g. ~3i 1p~) for GitHub-hosted repositories, fetched asynchronously via the ~gh~ CLI so the dashboard stays responsive and rows fill in once the queries return.  Requires ~gh~ to be installed and authenticated; toggle with ~project-overview-show-github~.

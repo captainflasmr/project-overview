@@ -11,10 +11,10 @@ projects Emacs already knows about (the =project-switch-project= list) —
 surfacing the kind of status you usually have to dig for:
 
 #+begin_example
-Project                   Version   ChangeLog     Bugs   Branch   Git   Remote   Owner           Known   Commit
-ollama-buddy              7.5.3     2026-05-19    2/15   main     *     github   captainflasmr   ✓       2026-06-02 14:32
-simply-annotate           1.2.0     2026-05-31    4/9    develop  ↑2    github   captainflasmr   ✓       2026-05-31 09:18
-bank-buddy                0.3.1     2026-01-16            main          gitlab   somegroup               2026-01-16 21:05
+Project                   Version  ChangeLog   Bugs  Branch  Git  Remote  Owner          K  M  Commit            Last Commit
+ollama-buddy              7.5.3    2026-05-19  2/15  main    *    github  captainflasmr  ✓  ✓  2026-06-02 14:32  Add streaming response handler
+simply-annotate           1.2.0    2026-05-31  4/9   develop ↑2   github  captainflasmr  ✓     2026-05-31 09:18  Fix overlay refresh on save
+bank-buddy                0.3.1    2026-01-16        main         gitlab  somegroup            2026-01-16 21:05  Tidy up category parsing
 #+end_example
 
 The table opens sorted by =Commit= date/time, most recently committed first.
@@ -32,11 +32,14 @@ The table opens sorted by =Commit= date/time, most recently committed first.
   Blank for repositories with no remote (local only).
 - *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub
   username or organisation (=alice= for =github.com/alice/repo=).
-- *Known* :: =✓= when the project is on Emacs's known-projects list
+- *K (Known)* :: =✓= when the project is on Emacs's known-projects list
   (=project-known-project-roots=, the =project-switch-project= list); blank
   otherwise.
+- *M (MELPA)* :: =✓= when a package matching the project's directory name is
+  available from MELPA; blank otherwise.
 - *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving
   a granular default sort.
+- *Last Commit* :: the subject (first line) of the most recent commit message.
 - *Description* :: the first sentence of the project's =README.org= (or
   =README.md=), collapsed to a single line.
 
@@ -90,14 +93,14 @@ different view of your repositories:
 | =b= | only repos with open =BUGS.org= entries          |
 | =u= | only repos ahead of / behind their upstream     |
 | =n= | only repos whose name matches a regexp          |
-| =a= | clear the filter (show all again)               |
+| =/= | clear the filter (show all again)               |
 
 While a filter is active it is shown in the header line (=⦅ filter: dirty
 — 5 shown ⦆=) and in the mode line as =[dirty 5/42]=.  The whole header
 line uses the theme's =header-line= face, so it stays readable on any
 theme.  Filters are remembered across =g= (refresh), so you can
 keep, say, the "dirty" view live while you work through it, and clear it
-with =/ a= when done.
+with =/ /= when done.
 
 Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
 same actions grouped into columns, headed by the project under point.
