@@ -93,6 +93,9 @@ different view of your repositories:
 | =d= | only repos with uncommitted changes             |
 | =b= | only repos with open =BUGS.org= entries          |
 | =u= | only repos ahead of / behind their upstream     |
+| =o= | only repos owned by =project-overview-github-user= |
+| =m= | only repos whose package is available on MELPA  |
+| =g= | only repos with open GitHub issues or PRs       |
 | =n= | only repos whose name matches a regexp          |
 | =/= | clear the filter (show all again)               |
 
@@ -120,6 +123,13 @@ dashboard knows about the project under point into one place:
 
 It reuses the already-scanned data, so it is near-instant — handy for a
 quick "what is going on with this repo?" without switching to it.
+
+All of the right-hand views — the detail card, the changelog preview
+(=c=), the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the
+GitHub issue/PR panels (=i=/=P=) — share a single side window: opening
+another reuses that one window rather than splitting off a new one.  None
+of them take focus, so point always stays on the dashboard and you can
+keep moving down the list to flip through projects.
 
 * Scanning
 

@@ -1,5 +1,11 @@
 #+TITLE: Changelog for project-overview
 
+* [0.6.0] - 2026-06-11
+** Added
+- New filter ~/ g~ (~project-overview-filter-github~): show only repositories with one or more open GitHub issues or pull requests (from the cached counts; projects whose GitHub data has not been fetched are excluded).
+** Changed
+- All of the dashboard's right-hand views — the detail card (~.~), the CHANGELOG/BUGS/README visits (~C~/~b~/~R~), the changelog preview (~c~) and the GitHub issue/PR panels (~i~/~P~) — now share a single reusable side window instead of splitting off a new window each time, and they never take focus: point always stays on the dashboard.
+
 * [0.5.0] - 2026-06-10
 ** Added
 - Incremental (asynchronous) scanning: the dashboard now draws immediately and refreshes each project's git/CHANGELOG/BUGS data a batch at a time on a short timer, so Emacs stays responsive while a large set of repositories is scanned.  Rows reuse the previous scan's data until each project is re-probed, and a ~scanning N/M~ indicator appears in the header line.  Controlled by ~project-overview-async-scan~ (default on) and ~project-overview-async-batch-size~ (default 4); set the former to nil for the old single-pass synchronous scan.

@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.5.0
-;; Package-Version: 0.5.0
+;; Version: 0.6.0
+;; Package-Version: 0.6.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -78,7 +78,8 @@
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream,
 ;; repos owned by `project-overview-github-user', repos available on
-;; MELPA, or a name regexp.  The active filter and shown/total count
+;; MELPA, repos with open GitHub issues or pull requests, or a name
+;; regexp.  The active filter and shown/total count
 ;; appear in the mode line, and survive a refresh until cleared with
 ;; `/ /'.
 ;;
@@ -1023,6 +1024,18 @@ which keeps item bodies from breaking the buffer's outline."
       (when in-code (push "#+end_src" out))
       (concat (mapconcat #'identity (nreverse out) "\n") "\n"))))
 
+(defun project-overview--display-side (buffer)
+  "Display BUFFER in the shared right-hand side window and return that window.
+All of the dashboard's right-hand views — the detail card, the
+CHANGELOG/BUGS/README visits and the GitHub panels — route through
+here so they reuse a single side window (side `right', slot 0)
+rather than splitting off a new window each time.  Focus is never
+moved: it always stays on the project-overview dashboard."
+  (display-buffer buffer '(display-buffer-in-side-window
+                           (side . right)
+                           (slot . 0)
+                           (window-width . 0.4))))
+
 (defun project-overview--github-render (kind slug items)
   "Render ITEMS (issues or PRs) for SLUG into an Org buffer and show it.
 KIND is `issue' or `pr'; ITEMS is the parsed JSON list from gh."
@@ -1067,8 +1080,7 @@ KIND is `issue' or `pr'; ITEMS is the parsed JSON list from gh."
         (org-mode)
         (font-lock-ensure)
         (view-mode 1)))
-    (select-window
-     (display-buffer buf '(display-buffer-in-direction (direction . right))))))
+    (project-overview--display-side buf)))
 
 (defun project-overview--github-list (kind)
   "Fetch and display open GitHub issues or PRs for the project under point.
@@ -1435,18 +1447,14 @@ Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
   (interactive)
   (let ((f (expand-file-name "CHANGELOG.org" (project-overview--root))))
     (unless (file-exists-p f) (user-error "No CHANGELOG.org in this project"))
-    (select-window
-     (display-buffer (find-file-noselect f)
-                     '(display-buffer-in-direction (direction . right))))))
+    (project-overview--display-side (find-file-noselect f))))
 
 (defun project-overview-bugs-file ()
   "Visit BUGS.org of the project under point in a window to the right."
   (interactive)
   (let ((f (expand-file-name "BUGS.org" (project-overview--root))))
     (unless (file-exists-p f) (user-error "No BUGS.org in this project"))
-    (select-window
-     (display-buffer (find-file-noselect f)
-                     '(display-buffer-in-direction (direction . right))))))
+    (project-overview--display-side (find-file-noselect f))))
 
 (defun project-overview-readme ()
   "Visit the README of the project under point in a window to the right.
@@ -1458,9 +1466,7 @@ Looks for README.org, README.md, README.rst, README.txt or README."
                               '("README.org" "README.md" "readme.org"
                                 "README.rst" "README.txt" "README")))))
     (unless f (user-error "No README in this project"))
-    (select-window
-     (display-buffer (find-file-noselect f)
-                     '(display-buffer-in-direction (direction . right))))))
+    (project-overview--display-side (find-file-noselect f))))
 
 (defun project-overview--detail-git-line (git)
   "Return a one-line human summary of the GIT status plist."
@@ -1547,8 +1553,9 @@ scanned cache; the only fresh work is a couple of cheap local reads."
         (org-mode)
         (font-lock-ensure)
         (view-mode 1)))
-    (select-window
-     (display-buffer buf '(display-buffer-in-direction (direction . right))))))
+    ;; Show the card in the shared right-hand side window without taking
+    ;; focus, so it is reused (not re-split) as the user moves down the list.
+    (project-overview--display-side buf)))
 
 ;;; Bugs agenda (single project and all projects)
 
@@ -1681,8 +1688,7 @@ The entry is shown read-only in a right-hand side window."
           (font-lock-ensure)
           (visual-line-mode 1)
           (view-mode 1)))
-      (display-buffer buf '(display-buffer-in-side-window
-                            (side . right) (window-width . 0.4))))))
+      (project-overview--display-side buf))))
 
 (defun project-overview-refresh ()
   "Re-scan all projects and redraw the dashboard.
@@ -1769,6 +1775,13 @@ list) is taken from the cache while it is fresh.  Use
   "Keep CELL when a package of its name is available on MELPA."
   (plist-get (cdr cell) :melpa))
 
+(defun project-overview--filter-github (cell)
+  "Keep CELL when it has one or more open GitHub issues or pull requests.
+The `:gh' counts are nil until fetched, in which case CELL is dropped."
+  (let ((gh (plist-get (cdr cell) :gh)))
+    (and gh (or (> (or (car gh) 0) 0)
+                (> (or (cdr gh) 0) 0)))))
+
 (defun project-overview--apply-filter (label predicate)
   "Filter the dashboard to projects matching PREDICATE, described by LABEL.
 A nil PREDICATE clears the filter.  Updates the mode line with the
@@ -1824,6 +1837,12 @@ shown/total counts and redraws."
   "Show only projects whose package is available on MELPA."
   (interactive)
   (project-overview--apply-filter "on MELPA" #'project-overview--filter-melpa))
+
+(defun project-overview-filter-github ()
+  "Show only projects with open GitHub issues or pull requests."
+  (interactive)
+  (project-overview--apply-filter "GitHub issues/PRs"
+                                  #'project-overview--filter-github))
 
 (defun project-overview-filter-clear ()
   "Clear any active filter and show every project."
@@ -1909,6 +1928,7 @@ be hidden or shown without switching layouts."
    ("u" "out of sync (ahead/behind)"  project-overview-filter-out-of-sync)
    ("o" "owned by me"                 project-overview-filter-owned)
    ("m" "on MELPA"                    project-overview-filter-melpa)
+   ("g" "with GitHub issues/PRs"      project-overview-filter-github)
    ("n" "matching a name regexp…"     project-overview-filter-name)]
   ["Filter"
    ("/" "all (clear filter)"          project-overview-filter-clear)
