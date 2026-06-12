@@ -130,6 +130,7 @@
 (declare-function consult-ripgrep "ext:consult" (&optional dir initial))
 (declare-function org-todo-list "org-agenda" (&optional arg))
 (declare-function org-mode "org" ())
+(declare-function org-display-inline-images "org" (&optional include-linked refresh beg end))
 (declare-function project-known-project-roots "project" ())
 (defvar org-agenda-files)
 (defvar org-agenda-prefix-format)
@@ -280,6 +281,22 @@ scan everything synchronously in one (blocking) pass."
   "Number of projects processed per tick during an asynchronous scan.
 Larger values finish sooner but yield to user input less often.  Only
 used when `project-overview-async-scan' is non-nil."
+  :type 'integer
+  :group 'project-overview)
+
+(defcustom project-overview-card-image t
+  "When non-nil, show the project's README logo/banner in the detail card.
+The first local image referenced near the top of the README is rendered
+inline above the status block.  Remote image URLs (badges and the like)
+are ignored.  Set to nil to omit the image."
+  :type 'boolean
+  :group 'project-overview)
+
+(defcustom project-overview-card-image-width 320
+  "Width in pixels for the README image shown in the detail card.
+Used as the buffer-local `org-image-actual-width' so the logo is scaled
+to a consistent size.  Only used when `project-overview-card-image' is
+non-nil."
   :type 'integer
   :group 'project-overview)
 
@@ -617,7 +634,10 @@ Each entry is \"YYYY-MM-DD  subject\"; nil when ROOT is not a git repo."
            (string-prefix-p "|" line)    ; table
            (string-prefix-p ">" line)    ; block quote
            (string-prefix-p "-" line)    ; list item / horizontal rule
-           (string-prefix-p ":" line)))) ; org drawer / property
+           (string-prefix-p ":" line)    ; org drawer / property
+           (string-prefix-p "!" line)    ; md image: ![alt](src)
+           (string-prefix-p "[" line)    ; org link/image or md badge
+           (string-prefix-p "<" line)))) ; html (e.g. <img>, <p align=...>)
 
 (defun project-overview--clean-text (s)
   "Strip light org/markdown inline markup from S and collapse whitespace."
@@ -654,6 +674,45 @@ empty string when no README or prose is found."
             (if (string-match "\\`\\(.+?[.!?]\\)\\(?:[ \t]\\|\\'\\)" text)
                 (match-string 1 text)
               text)))))))
+
+(defconst project-overview--image-extensions
+  '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp")
+  "Image file extensions eligible for inline rendering in the detail card.")
+
+(defun project-overview--image-file-p (path)
+  "Non-nil if PATH ends in a known image extension."
+  (and path
+       (member (downcase (or (file-name-extension path) ""))
+               project-overview--image-extensions)))
+
+(defun project-overview--readme-image (root)
+  "Return an absolute path to the first local image in ROOT's README, or nil.
+Scans the leading portion of README.org/README.md for markdown, org or
+HTML image references, and returns the absolute path of the first one
+that resolves to an existing local image file.  Remote URLs (badges and
+the like) are skipped."
+  (let ((readme (seq-find #'file-readable-p
+                          (list (expand-file-name "README.org" root)
+                                (expand-file-name "README.md" root)
+                                (expand-file-name "readme.org" root)))))
+    (when readme
+      (with-temp-buffer
+        (insert-file-contents readme nil 0 4000)
+        (goto-char (point-min))
+        (let ((re (concat
+                   "!\\[[^]]*\\](\\([^)]+\\))"               ; md   ![alt](src)
+                   "\\|\\[\\[\\(?:file:\\)?\\([^]]+\\)\\]\\]" ; org  [[file:src]]
+                   "\\|<img[^>]*\\bsrc=\"\\([^\"]+\\)\""))    ; html <img src="src">
+              found)
+          (while (and (not found) (re-search-forward re nil t))
+            (let ((ref (or (match-string 1) (match-string 2) (match-string 3))))
+              (when (and ref
+                         (not (string-match-p "\\`[a-z][a-z0-9+.-]*://" ref))
+                         (project-overview--image-file-p ref))
+                (let ((abs (expand-file-name
+                            ref (file-name-directory readme))))
+                  (when (file-readable-p abs) (setq found abs))))))
+          found)))))
 
 (defun project-overview--remote-host (url)
   "Return a short forge label for git remote URL, or \"\" when unknown.
@@ -1504,6 +1563,10 @@ scanned cache; the only fresh work is a couple of cheap local reads."
         (insert (format "#+title: %s\n" name))
         (insert (format "# %s\n\n" (abbreviate-file-name
                                     (directory-file-name root))))
+        (when project-overview-card-image
+          (let ((img (project-overview--readme-image root)))
+            (when img
+              (insert (format "[[file:%s]]\n\n" img)))))
         (let ((desc (plist-get p :desc)))
           (when (and desc (not (string-empty-p desc)))
             (insert desc "\n\n")))
@@ -1552,6 +1615,9 @@ scanned cache; the only fresh work is a couple of cheap local reads."
         (goto-char (point-min))
         (org-mode)
         (font-lock-ensure)
+        (when project-overview-card-image
+          (setq-local org-image-actual-width project-overview-card-image-width)
+          (org-display-inline-images))
         (view-mode 1)))
     ;; Show the card in the shared right-hand side window without taking
     ;; focus, so it is reused (not re-split) as the user moves down the list.
