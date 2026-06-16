@@ -3,7 +3,7 @@
 * [0.7.0] - 2026-06-16
 ** Added
 - ~project-overview-pull-repos~: run a real ~git pull~ over every repository in the dashboard, a few at a time (~project-overview-pull-jobs~, default 4) on background processes so Emacs stays responsive.  Only repositories with a configured remote are pulled, using ~project-overview-pull-args~ (~--ff-only~ by default, so a batch never stops to resolve a merge).  When the batch finishes the dashboard is re-scanned and any failures are collected in a ~*Project pull*~ side buffer.  Reachable from the cache/pull transient (~r g~).
-- ~p~ (~project-overview-pull-repo~): ~git pull~ just the project under point (also on the ~?~ dispatch and at ~r u~).
+- ~project-overview-pull-repo~: ~git pull~ just the project under point, reachable from the ~?~ dispatch and at ~r u~.
 
 * [0.6.0] - 2026-06-11
 ** Added

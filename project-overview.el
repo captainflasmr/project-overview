@@ -70,7 +70,6 @@
 ;;   D        dired at root            g  refresh (re-scan)
 ;;   !        shell at root            r  cache / pull (transient)
 ;;   w        browse remote in browser ?  transient menu of all actions
-;;   p        git pull (under point)
 ;;                                     V  cycle column layout
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
@@ -111,10 +110,10 @@
 ;; (`project-overview-cache-dispatch') force-pulls fresh GitHub counts,
 ;; the MELPA list, or everything, and can clear the cache.  The same
 ;; transient also runs a real \"git pull\" over the working trees:
-;; `project-overview-pull-repos' pulls every repository with a remote a
-;; few at a time (`project-overview-pull-args', \"--ff-only\" by default),
-;; and `p' pulls just the project under point, re-scanning the dashboard
-;; when the pulls finish.
+;; `project-overview-pull-repos' (`r g') pulls every repository with a
+;; remote a few at a time (`project-overview-pull-args', \"--ff-only\" by
+;; default), and `r u' pulls just the project under point, re-scanning
+;; the dashboard when the pulls finish.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -2271,7 +2270,7 @@ screen), and the filter name is appended."
     (define-key map "s" #'project-overview-search)
     (define-key map "m" #'project-overview-magit)
     (define-key map "w" #'project-overview-browse-remote)
-    (define-key map "p" #'project-overview-pull-repo)
+    (define-key map "p" #'previous-line)
     (define-key map "D" #'project-overview-dired)
     (define-key map "!" #'project-overview-shell)
     ;; Inspect.
