@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.6.0
-;; Package-Version: 0.6.0
+;; Version: 0.7.0
+;; Package-Version: 0.7.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -70,6 +70,7 @@
 ;;   D        dired at root            g  refresh (re-scan)
 ;;   !        shell at root            r  cache / pull (transient)
 ;;   w        browse remote in browser ?  transient menu of all actions
+;;   p        git pull (under point)
 ;;                                     V  cycle column layout
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
@@ -108,7 +109,12 @@
 ;; with a `project-overview-cache-ttl' lifetime, so it survives restarts
 ;; and an ordinary refresh (`g') need not hit the network.  `r'
 ;; (`project-overview-cache-dispatch') force-pulls fresh GitHub counts,
-;; the MELPA list, or everything, and can clear the cache.
+;; the MELPA list, or everything, and can clear the cache.  The same
+;; transient also runs a real \"git pull\" over the working trees:
+;; `project-overview-pull-repos' pulls every repository with a remote a
+;; few at a time (`project-overview-pull-args', \"--ff-only\" by default),
+;; and `p' pulls just the project under point, re-scanning the dashboard
+;; when the pulls finish.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -226,6 +232,23 @@ Applies to the MELPA package list and to per-repository GitHub counts.
 A normal refresh (\\[project-overview-refresh]) reuses cached data
 while it is fresh; the pull commands in `project-overview-cache-dispatch'
 force a re-fetch regardless."
+  :type 'integer
+  :group 'project-overview)
+
+(defcustom project-overview-pull-args '("--ff-only")
+  "Arguments passed to \"git pull\" by the repository pull commands.
+The default \"--ff-only\" fast-forwards each repository when possible and
+refuses to create a merge commit, so a batch pull
+\(`project-overview-pull-repos') never stops to resolve a merge.  Set to
+nil for a plain \"git pull\"."
+  :type '(repeat string)
+  :group 'project-overview)
+
+(defcustom project-overview-pull-jobs 4
+  "Maximum number of concurrent \"git pull\" processes.
+Used by `project-overview-pull-repos' to bound how many repositories are
+pulled at once.  A larger value finishes sooner but spawns more
+processes."
   :type 'integer
   :group 'project-overview)
 
@@ -1803,6 +1826,163 @@ list) is taken from the cache while it is fresh.  Use
   (message "Cache cleared")
   (project-overview-refresh))
 
+;;; Git pull
+
+;; Running "git pull" over many working trees at once: the headline
+;; command pulls every repository shown in the dashboard, a few at a time
+;; on background processes, and a per-row command pulls just the project
+;; under point.  Pulls use `project-overview-pull-args' ("--ff-only" by
+;; default) so a batch never stops to resolve a merge, and the dashboard
+;; is re-scanned afterwards so the branch/ahead-behind/commit columns
+;; reflect the result.
+
+(defvar project-overview--pull-queue nil
+  "Repository roots still awaiting a \"git pull\" in the current batch.")
+
+(defvar project-overview--pull-active 0
+  "Number of \"git pull\" processes currently running.")
+
+(defvar project-overview--pull-total 0
+  "Number of repositories in the current pull batch, for progress reporting.")
+
+(defvar project-overview--pull-done 0
+  "Number of repositories whose pull has finished in the current batch.")
+
+(defvar project-overview--pull-ok 0
+  "Number of repositories pulled successfully in the current batch.")
+
+(defvar project-overview--pull-fail nil
+  "Alist of (NAME . OUTPUT) for repositories whose pull failed this batch.")
+
+(defun project-overview--repo-has-remote-p (root)
+  "Non-nil when ROOT has a git remote configured to pull from."
+  (let ((url (project-overview--remote-url root)))
+    (and url (not (string-empty-p url)))))
+
+(defun project-overview--pullable-roots (&optional cells)
+  "Return roots of CELLS (default the live cache) that have a git remote.
+Repositories without a remote (matched on the cached :host) are dropped,
+since there is nothing to pull from."
+  (delq nil
+        (mapcar (lambda (cell)
+                  (let ((host (plist-get (plist-get (cdr cell) :git) :host)))
+                    (when (and (stringp host) (not (string-empty-p host)))
+                      (car cell))))
+                (or cells project-overview--cache))))
+
+(defun project-overview--pull-report (fails)
+  "Show FAILS, an alist of (NAME . OUTPUT), in a side buffer."
+  (let ((buf (get-buffer-create "*Project pull*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "git pull failed for %d repositor%s:\n\n"
+                        (length fails) (if (= (length fails) 1) "y" "ies")))
+        (dolist (f fails)
+          (insert (format "* %s\n" (car f)))
+          (unless (string-empty-p (cdr f))
+            (insert (replace-regexp-in-string "^" "  " (cdr f)) "\n"))
+          (insert "\n"))
+        (goto-char (point-min))
+        (view-mode 1)))
+    (project-overview--display-side buf)))
+
+(defun project-overview--pull-finish ()
+  "Report the finished pull batch and re-scan the dashboard."
+  (let ((fails (nreverse project-overview--pull-fail)))
+    (setq project-overview--pull-fail nil)
+    (when fails (project-overview--pull-report fails))
+    (when (buffer-live-p (get-buffer project-overview-buffer-name))
+      (project-overview--rescan))
+    (message "Pulling repositories…done (%d ok, %d failed of %d)"
+             project-overview--pull-ok (length fails)
+             project-overview--pull-total)))
+
+(defun project-overview--pull-sentinel (proc _event)
+  "Record the result of one \"git pull\" PROC and pump the queue."
+  (when (memq (process-status proc) '(exit signal))
+    (let ((name (process-get proc 'project-overview-name))
+          (buf (process-buffer proc)))
+      (setq project-overview--pull-done (1+ project-overview--pull-done)
+            project-overview--pull-active (1- project-overview--pull-active))
+      (if (and (eq (process-status proc) 'exit)
+               (zerop (process-exit-status proc)))
+          (setq project-overview--pull-ok (1+ project-overview--pull-ok))
+        (push (cons name
+                    (string-trim
+                     (or (and (buffer-live-p buf)
+                              (with-current-buffer buf (buffer-string)))
+                         "")))
+              project-overview--pull-fail))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (message "Pulling repositories… %d/%d"
+               project-overview--pull-done project-overview--pull-total)
+      (project-overview--pull-pump))))
+
+(defun project-overview--pull-pump ()
+  "Start pulls up to `project-overview-pull-jobs', then finish when drained."
+  (while (and project-overview--pull-queue
+              (< project-overview--pull-active
+                 (max 1 project-overview-pull-jobs)))
+    (let* ((root (pop project-overview--pull-queue))
+           (name (file-name-nondirectory (directory-file-name root)))
+           (buf (generate-new-buffer " *project-overview-pull*")))
+      (setq project-overview--pull-active (1+ project-overview--pull-active))
+      (condition-case err
+          (let ((proc (make-process
+                       :name "project-overview-pull"
+                       :buffer buf
+                       :noquery t
+                       :connection-type 'pipe
+                       :command (append
+                                 (list "git" "-C" (expand-file-name root) "pull")
+                                 project-overview-pull-args)
+                       :sentinel #'project-overview--pull-sentinel)))
+            (process-put proc 'project-overview-name name))
+        (error
+         (setq project-overview--pull-active (1- project-overview--pull-active)
+               project-overview--pull-done (1+ project-overview--pull-done))
+         (push (cons name (error-message-string err))
+               project-overview--pull-fail)
+         (when (buffer-live-p buf) (kill-buffer buf))))))
+  (when (and (null project-overview--pull-queue)
+             (zerop project-overview--pull-active))
+    (project-overview--pull-finish)))
+
+(defun project-overview--pull-start (roots)
+  "Begin an asynchronous \"git pull\" over ROOTS."
+  (when (> project-overview--pull-active 0)
+    (user-error "A repository pull is already in progress"))
+  (if (null roots)
+      (message "No repositories with a remote to pull")
+    (setq project-overview--pull-queue roots
+          project-overview--pull-total (length roots)
+          project-overview--pull-active 0
+          project-overview--pull-done 0
+          project-overview--pull-ok 0
+          project-overview--pull-fail nil)
+    (message "Pulling %d repositor%s…" project-overview--pull-total
+             (if (= project-overview--pull-total 1) "y" "ies"))
+    (project-overview--pull-pump)))
+
+(defun project-overview-pull-repos ()
+  "Run \"git pull\" on every repository in the dashboard, asynchronously.
+Only repositories with a configured remote are pulled, a few at a time
+\(`project-overview-pull-jobs') with the arguments in
+`project-overview-pull-args' (\"--ff-only\" by default, so a pull never
+stops to resolve a merge).  When the batch finishes the dashboard is
+re-scanned and any failures are listed in a side buffer."
+  (interactive)
+  (project-overview--pull-start (project-overview--pullable-roots)))
+
+(defun project-overview-pull-repo ()
+  "Run \"git pull\" on the project under point, asynchronously."
+  (interactive)
+  (let ((root (project-overview--root)))
+    (unless (project-overview--repo-has-remote-p root)
+      (user-error "This project has no git remote to pull"))
+    (project-overview--pull-start (list root))))
+
 ;;;###autoload (autoload 'project-overview-cache-dispatch "project-overview" nil t)
 (transient-define-prefix project-overview-cache-dispatch ()
   "Refresh or clear the dashboard's cached network data."
@@ -1810,6 +1990,9 @@ list) is taken from the cache while it is fresh.  Use
    ("p" "GitHub counts" project-overview-pull-github)
    ("m" "MELPA list"    project-overview-pull-melpa)
    ("a" "everything"    project-overview-pull-all)]
+  ["Git pull (working trees)"
+   ("g" "all repositories" project-overview-pull-repos)
+   ("u" "project at point"  project-overview-pull-repo)]
   ["Cache"
    ("c" "clear on-disk cache" project-overview-cache-clear)
    ("q" "quit"                transient-quit-one)])
@@ -1949,6 +2132,7 @@ shown/total counts and redraws."
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
     ("w" "browse remote"     project-overview-browse-remote)
+    ("p" "git pull"          project-overview-pull-repo)
     ("s" "search"            project-overview-search)]
    ["Dashboard"
     ("/" "filter…"        project-overview-filter-dispatch)
@@ -2087,6 +2271,7 @@ screen), and the filter name is appended."
     (define-key map "s" #'project-overview-search)
     (define-key map "m" #'project-overview-magit)
     (define-key map "w" #'project-overview-browse-remote)
+    (define-key map "p" #'project-overview-pull-repo)
     (define-key map "D" #'project-overview-dired)
     (define-key map "!" #'project-overview-shell)
     ;; Inspect.
