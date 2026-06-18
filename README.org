@@ -4,11 +4,7 @@
 #+language: en
 #+options: ':t toc:nil author:nil email:nil num:nil title:nil
 
-A central, sortable table of your git projects. =M-x project-overview=
-opens a =tabulated-list-mode= buffer with one row per project — the git
-repositories found under =project-overview-search-roots= plus the
-projects Emacs already knows about (the =project-switch-project= list) —
-surfacing the kind of status you usually have to dig for:
+A central, sortable table of your git projects. =M-x project-overview= opens a =tabulated-list-mode= buffer with one row per project — the git repositories found under =project-overview-search-roots= plus the projects Emacs already knows about (the =project-switch-project= list) — surfacing the kind of status you usually have to dig for:
 
 #+begin_example
 Project                   Version  ChangeLog   Bugs  Branch  Git  Remote  Owner          K  M  Commit            Last Commit
@@ -21,27 +17,16 @@ The table opens sorted by =Commit= date/time, most recently committed first.
 
 * What each column means
 
-- *Version / ChangeLog* :: parsed from the first =** <date> *X.Y.Z*= heading in
-  the project's =CHANGELOG.org=.
-- *Bugs* :: =open/total= count from =BUGS.org= (=TODO=/=DOING= vs everything,
-  including =DONE=). Highlighted when there are open items.
-- *Branch / Git* :: current branch, =*= when the worktree is dirty, and
-  =↑n=/=↓n= for commits ahead of / behind the upstream.
-- *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=,
-  =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.
-  Blank for repositories with no remote (local only).
-- *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub
-  username or organisation (=alice= for =github.com/alice/repo=).
-- *K (Known)* :: =✓= when the project is on Emacs's known-projects list
-  (=project-known-project-roots=, the =project-switch-project= list); blank
-  otherwise.
-- *M (MELPA)* :: =✓= when a package matching the project's directory name is
-  available from MELPA; blank otherwise.
-- *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving
-  a granular default sort.
+- *Version / ChangeLog* :: parsed from the first =** <date> *X.Y.Z*= heading in the project's =CHANGELOG.org=.
+- *Bugs* :: =open/total= count from =BUGS.org= (=TODO=/=DOING= vs everything, including =DONE=). Highlighted when there are open items.
+- *Branch / Git* :: current branch, =*= when the worktree is dirty, and =↑n=/=↓n= for commits ahead of / behind the upstream.
+- *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=, =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.  Blank for repositories with no remote (local only).
+- *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub username or organisation (=alice= for =github.com/alice/repo=).
+- *K (Known)* :: =✓= when the project is on Emacs's known-projects list (=project-known-project-roots=, the =project-switch-project= list); blank otherwise.
+- *M (MELPA)* :: =✓= when a package matching the project's directory name is available from MELPA; blank otherwise.
+- *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving a granular default sort.
 - *Last Commit* :: the subject (first line) of the most recent commit message.
-- *Description* :: the first sentence of the project's =README.org= (or
-  =README.md=), collapsed to a single line.
+- *Description* :: the first sentence of the project's =README.org= (or =README.md=), collapsed to a single line.
 
 Click a column header (or press =S=) to sort by it.
 
@@ -53,96 +38,71 @@ A header line shows aggregate status across all projects, e.g.:
 
 The counts cover the full set regardless of any active filter.
 
-The mode line shows the full (abbreviated) path of the project under
-point, updating as you move between rows.
+The mode line shows the full (abbreviated) path of the project under point, updating as you move between rows.
 
 * Actions
 
-Single keys act on the project under point.  The =project.el= actions use
-the same keys as the =project-switch-project= menu:
+Single keys act on the project under point.  The =project.el= actions use the same keys as the =project-switch-project= menu:
 
-| Key       | Action                                       |
-|-----------+----------------------------------------------|
-| =RET= / =o= | switch to project (=project-switch-project=) |
-| =f=         | find file (=project-find-file=)              |
-| =G=         | find regexp (=project-find-regexp=)          |
-| =d=         | find directory (=project-find-dir=)          |
-| =v=         | =project-vc-dir=                             |
-| =e=         | =project-eshell=                            |
-| =s=         | search (=consult-ripgrep=, else project grep)|
-| =m=         | =magit-status=                               |
-| =D=         | dired at root                                |
-| =!=         | shell at root                                |
-| =.=         | detail card in a window to the right         |
+| Key         | Action                                        |
+|-------------+-----------------------------------------------|
+| =RET= / =o= | switch to project (=project-switch-project=)  |
+| =f=         | find file (=project-find-file=)               |
+| =G=         | find regexp (=project-find-regexp=)           |
+| =d=         | find directory (=project-find-dir=)           |
+| =v=         | =project-vc-dir=                              |
+| =e=         | =project-eshell=                              |
+| =s=         | search (=consult-ripgrep=, else project grep) |
+| =m=         | =magit-status=                                |
+| =D=         | dired at root                                 |
+| =!=         | shell at root                                 |
+| =.=         | detail card in a window to the right          |
 | =c=         | preview latest =CHANGELOG.org= entry          |
-| =C=         | open =CHANGELOG.org= in a window to the right  |
+| =C=         | open =CHANGELOG.org= in a window to the right |
 | =b=         | open =BUGS.org= in a window to the right      |
-| =B=         | TODO agenda scoped to this project's bugs    |
-| =A=         | TODO agenda for every project's bugs         |
-| =/=         | filter the view (transient)                  |
-| =g=         | refresh (re-scan)                            |
-| =?=         | transient menu of all the above              |
+| =B=         | TODO agenda scoped to this project's bugs     |
+| =A=         | TODO agenda for every project's bugs          |
+| =/=         | filter the view (transient)                   |
+| =g=         | refresh (re-scan)                             |
+| =?=         | transient menu of all the above               |
 
 * Filtering
 
-Press =/= (=project-overview-filter-dispatch=) to narrow the table to a
-different view of your repositories:
+Press =/= (=project-overview-filter-dispatch=) to narrow the table to a different view of your repositories:
 
-| Key | View                                            |
-|-----+-------------------------------------------------|
-| =d= | only repos with uncommitted changes             |
-| =b= | only repos with open =BUGS.org= entries          |
-| =u= | only repos ahead of / behind their upstream     |
+| Key | View                                               |
+|-----+----------------------------------------------------|
+| =d= | only repos with uncommitted changes                |
+| =b= | only repos with open =BUGS.org= entries            |
+| =u= | only repos ahead of / behind their upstream        |
 | =o= | only repos owned by =project-overview-github-user= |
-| =m= | only repos whose package is available on MELPA  |
-| =g= | only repos with open GitHub issues or PRs       |
-| =n= | only repos whose name matches a regexp          |
-| =/= | clear the filter (show all again)               |
+| =m= | only repos whose package is available on MELPA     |
+| =g= | only repos with open GitHub issues or PRs          |
+| =n= | only repos whose name matches a regexp             |
+| =/= | clear the filter (show all again)                  |
 
-While a filter is active it is shown in the header line (=⦅ filter: dirty
-— 5 shown ⦆=) and in the mode line as =[dirty 5/42]=.  The whole header
-line uses the theme's =header-line= face, so it stays readable on any
-theme.  Filters are remembered across =g= (refresh), so you can
-keep, say, the "dirty" view live while you work through it, and clear it
-with =/ /= when done.
+While a filter is active it is shown in the header line (=⦅ filter: dirty — 5 shown ⦆=) and in the mode line as =[dirty 5/42]=.  The whole header line uses the theme's =header-line= face, so it stays readable on any theme.  Filters are remembered across =g= (refresh), so you can keep, say, the "dirty" view live while you work through it, and clear it with =/ /= when done.
 
-Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the
-same actions grouped into columns, headed by the project under point.
+Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the same actions grouped into columns, headed by the project under point.
 
 * Detail card
 
-Press =.= (=project-overview-show-detail=) to open a per-project "card" in
-a window to the right — an Org buffer that gathers everything the
-dashboard knows about the project under point into one place:
+Press =.= (=project-overview-show-detail=) to open a per-project "card" in a window to the right — an Org buffer that gathers everything the dashboard knows about the project under point into one place:
 
-- status: version and changelog date, branch and git state, last commit,
-  remote (host / owner / repo), known-projects and MELPA flags, open
-  GitHub issue/PR counts (when fetched), and the README description;
+- status: version and changelog date, branch and git state, last commit, remote (host / owner / repo), known-projects and MELPA flags, open GitHub issue/PR counts (when fetched), and the README description;
 - the open =BUGS.org= headings; and
 - the ten most recent commits.
 
-It reuses the already-scanned data, so it is near-instant — handy for a
-quick "what is going on with this repo?" without switching to it.
+It reuses the already-scanned data, so it is near-instant — handy for a quick "what is going on with this repo?" without switching to it.
 
-All of the right-hand views — the detail card, the changelog preview
-(=c=), the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the
-GitHub issue/PR panels (=i=/=P=) — share a single side window: opening
-another reuses that one window rather than splitting off a new one.  None
-of them take focus, so point always stays on the dashboard and you can
-keep moving down the list to flip through projects.
+All of the right-hand views — the detail card, the changelog preview (=c=), the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the GitHub issue/PR panels (=i=/=P=) — share a single side window: opening another reuses that one window rather than splitting off a new one.  None of them take focus, so point always stays on the dashboard and you can keep moving down the list to flip through projects.
 
 * Scanning
 
-By default the dashboard scans *incrementally*: it appears immediately
-and fills each project's git/CHANGELOG/BUGS data in a few-at-a-time on a
-short timer, so Emacs stays responsive even with dozens of repositories.
-A =scanning N/M= indicator shows in the header line while this runs, and
-rows keep the previous scan's values until they are re-probed.
+By default the dashboard scans *incrementally*: it appears immediately and fills each project's git/CHANGELOG/BUGS data in a few-at-a-time on a short timer, so Emacs stays responsive even with dozens of repositories.  A =scanning N/M= indicator shows in the header line while this runs, and rows keep the previous scan's values until they are re-probed.
 
-- =project-overview-async-scan= :: non-nil (default) for incremental
-  scanning; nil for a single blocking pass.
-- =project-overview-async-batch-size= :: projects processed per timer tick
-  (default 4) — larger finishes sooner but yields to input less often.
+- =project-overview-async-scan= :: non-nil (default) for incremental scanning; nil for a single blocking pass.
+- =project-overview-async-batch-size= :: projects processed per timer tick (default 4) — larger finishes sooner but yields to input less often.
 
 * Installation
 
@@ -160,15 +120,9 @@ rows keep the previous scan's values until they are re-probed.
 
 * Customization
 
-- =project-overview-search-roots= :: directories scanned for git projects.
-  Each root is checked directly and one level deep for =.git= subdirs.
-- =project-overview-include-known-projects= :: when non-nil (the default),
-  also list the projects Emacs already knows about — the same roots
-  =project-switch-project= offers (=project-known-project-roots=) — merged
-  with those found under =project-overview-search-roots=.  These need not
-  be git repositories; non-git projects simply show blank git columns.
-- =project-overview-exclude-regexp= :: project directory names matching this
-  regexp are hidden.
+- =project-overview-search-roots= :: directories scanned for git projects.  Each root is checked directly and one level deep for =.git= subdirs.
+- =project-overview-include-known-projects= :: when non-nil (the default), also list the projects Emacs already knows about — the same roots =project-switch-project= offers (=project-known-project-roots=) — merged with those found under =project-overview-search-roots=.  These need not be git repositories; non-git projects simply show blank git columns.
+- =project-overview-exclude-regexp= :: project directory names matching this regexp are hidden.
 - =project-overview-buffer-name= :: name of the dashboard buffer.
 
 * Notes
