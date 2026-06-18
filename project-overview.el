@@ -2279,6 +2279,7 @@ screen), and the filter name is appended."
     (define-key map "R" #'project-overview-readme)
     (define-key map "." #'project-overview-show-detail)
     (define-key map "b" #'project-overview-bugs-file)
+    (define-key map (kbd "SPC") #'project-overview-bugs-file)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
     (define-key map "i" #'project-overview-github-issues)
