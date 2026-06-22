@@ -50,7 +50,7 @@ Single keys act on the project under point.  The =project.el= actions use the sa
 | =f=         | find file (=project-find-file=)               |
 | =G=         | find regexp (=project-find-regexp=)           |
 | =d=         | find directory (=project-find-dir=)           |
-| =v=         | =project-vc-dir=                              |
+| =v= / =SPC= | =project-vc-dir=                              |
 | =e=         | =project-eshell=                              |
 | =s=         | search (=consult-ripgrep=, else project grep) |
 | =m=         | =magit-status=                                |

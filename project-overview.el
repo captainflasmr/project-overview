@@ -65,7 +65,7 @@
 ;;   d        find directory           R  open README (window right)
 ;;   e        eshell                   b  open BUGS.org (window right)
 ;;   s        search (ripgrep)         B  TODO agenda for this project's bugs
-;;   v        vc-dir                   A  TODO agenda for all projects' bugs
+;;   v/SPC    vc-dir                   A  TODO agenda for all projects' bugs
 ;;   m        magit-status             /  filter the view (transient)
 ;;   D        dired at root            g  refresh (re-scan)
 ;;   !        shell at root            r  cache / pull (transient)
@@ -2279,7 +2279,7 @@ screen), and the filter name is appended."
     (define-key map "R" #'project-overview-readme)
     (define-key map "." #'project-overview-show-detail)
     (define-key map "b" #'project-overview-bugs-file)
-    (define-key map (kbd "SPC") #'project-overview-bugs-file)
+    (define-key map (kbd "SPC") #'project-overview-vc-dir)
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
     (define-key map "i" #'project-overview-github-issues)
