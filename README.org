@@ -22,6 +22,7 @@ The table opens sorted by =Commit= date/time, most recently committed first.
 - *Branch / Git* :: current branch, =*= when the worktree is dirty, and =↑n=/=↓n= for commits ahead of / behind the upstream.
 - *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=, =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.  Blank for repositories with no remote (local only).
 - *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub username or organisation (=alice= for =github.com/alice/repo=).
+- *GitHub* :: open issue/PR counts for GitHub-hosted repositories (e.g. =3i 1p=), fetched asynchronously with the =gh= CLI.  A project with new, unread issues or PRs is highlighted (name in red) and flagged with a leading =●= until acknowledged.
 - *K (Known)* :: =✓= when the project is on Emacs's known-projects list (=project-known-project-roots=, the =project-switch-project= list); blank otherwise.
 - *M (MELPA)* :: =✓= when a package matching the project's directory name is available from MELPA; blank otherwise.
 - *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving a granular default sort.
@@ -62,9 +63,23 @@ Single keys act on the project under point.  The =project.el= actions use the sa
 | =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs     |
 | =A=         | TODO agenda for every project's bugs          |
+| =i= / =P=   | open GitHub issues / PRs in a side buffer     |
+| =M=         | mark this project's new GitHub items as seen  |
 | =/=         | filter the view (transient)                   |
 | =g=         | refresh (re-scan)                             |
 | =?=         | transient menu of all the above               |
+
+* GitHub integration
+
+For GitHub-hosted projects the =GitHub= column shows the open issue and PR counts (via the =gh= CLI, which must be installed and authenticated).  =i= (=project-overview-github-issues=) and =P= (=project-overview-github-prs=) open the project's open issues or pull requests in an Org buffer — one heading per item with author, creation date, labels, URL, and body — in the shared right-hand window.  =w= opens the repository itself in a browser.
+
+Whenever a repository's GitHub data is re-fetched (a forced pull, or the first fetch after =project-overview-cache-ttl= expires), the newest open issues and PRs are compared with the numbers seen at the previous fetch.  Items raised in the meantime are brought to your attention:
+
+- the project name is highlighted (face =project-overview-github-new=) and a =●= marks its =GitHub= column;
+- the header line adds a =N new= count; and
+- a one-line summary is echoed, per =project-overview-github-notify=: =message= (the default) for an echo-area summary, =all= to also raise a desktop notification via =notifications-notify=, or =nil= for the markers only.
+
+New-activity markers persist across restarts (they live in the same on-disk cache as the counts) until you acknowledge them with =M= (=project-overview-github-mark-seen=) on the project under point, or =C-u M= for every project.  Press =/ N= to list just the projects with new activity.
 
 * Filtering
 
@@ -78,6 +93,7 @@ Press =/= (=project-overview-filter-dispatch=) to narrow the table to a differen
 | =o= | only repos owned by =project-overview-github-user= |
 | =m= | only repos whose package is available on MELPA     |
 | =g= | only repos with open GitHub issues or PRs          |
+| =N= | only repos with new (unread) GitHub activity       |
 | =n= | only repos whose name matches a regexp             |
 | =/= | clear the filter (show all again)                  |
 
@@ -124,6 +140,9 @@ By default the dashboard scans *incrementally*: it appears immediately and fills
 - =project-overview-include-known-projects= :: when non-nil (the default), also list the projects Emacs already knows about — the same roots =project-switch-project= offers (=project-known-project-roots=) — merged with those found under =project-overview-search-roots=.  These need not be git repositories; non-git projects simply show blank git columns.
 - =project-overview-exclude-regexp= :: project directory names matching this regexp are hidden.
 - =project-overview-buffer-name= :: name of the dashboard buffer.
+- =project-overview-show-github= :: when non-nil (the default), fetch open issue/PR counts for GitHub repositories with the =gh= CLI.
+- =project-overview-github-notify= :: how to announce newly raised GitHub issues and PRs — =message= (the default), =all= (also a desktop notification), or =nil= (dashboard markers only).  See [[GitHub integration]].
+- =project-overview-github-user= :: your GitHub username; its repositories' open issue/PR totals are summarised in the header line and the "owned by me" filter (=/ o=) uses it.
 
 * Notes
 

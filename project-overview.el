@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: tools, vc, convenience
-;; Version: 0.7.0
-;; Package-Version: 0.7.0
+;; Version: 0.8.0
+;; Package-Version: 0.8.0
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/project-overview
 ;;
@@ -37,6 +37,8 @@
 ;;   - the remote forge (github, gitlab, …) or blank for local-only,
 ;;   - the remote owner/user (e.g. the GitHub username),
 ;;   - for GitHub repos, the open issue and PR counts (via the gh CLI),
+;;     highlighted when new issues or PRs have appeared since the last
+;;     time they were reviewed,
 ;;   - a check mark when the project is on Emacs's known-projects list,
 ;;   - a check mark when a package of the same name is available on MELPA,
 ;;   - the last commit date,
@@ -74,12 +76,14 @@
 ;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
+;;                                     M  mark new GitHub items seen
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream,
 ;; repos owned by `project-overview-github-user', repos available on
-;; MELPA, repos with open GitHub issues or pull requests, or a name
-;; regexp.  The active filter and shown/total count
+;; MELPA, repos with open GitHub issues or pull requests, repos with
+;; unread new GitHub activity, or a name regexp.  The active filter and
+;; shown/total count
 ;; appear in the mode line, and survive a refresh until cleared with
 ;; `/ /'.
 ;;
@@ -114,6 +118,18 @@
 ;; remote a few at a time (`project-overview-pull-args', \"--ff-only\" by
 ;; default), and `r u' pulls just the project under point, re-scanning
 ;; the dashboard when the pulls finish.
+;;
+;; Whenever a repository's GitHub data is re-fetched (a forced pull, or
+;; the first fetch after the cache expires), the newest open issues and
+;; PRs are compared with the numbers seen at the previous fetch, so
+;; items raised in the meantime stand out: the project name is
+;; highlighted, a `●' marks its GitHub column, and the header line adds
+;; a \"new\" count — all kept, across restarts, until acknowledged with
+;; `M' (`project-overview-github-mark-seen'; a prefix argument marks
+;; everything).  The announcement follows
+;; `project-overview-github-notify' — a one-line echo-area summary by
+;; default, optionally a desktop notification.  `/ N' narrows the table
+;; to the projects with new activity.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -204,6 +220,23 @@ this user (matched on the remote owner) are shown alongside the other
 header-line counts, and the \"owned\" filter uses it.  Nil or the empty
 string (the default) omits that summary and disables the filter."
   :type '(choice (const :tag "None" nil) string)
+  :group 'project-overview)
+
+(defcustom project-overview-github-notify 'message
+  "How to announce newly raised GitHub issues and pull requests.
+New items are detected when a repository is re-fetched (a forced pull
+with `r p', or the first fetch after the cache expires) by comparing
+the newest open items against the numbers already seen.  The dashboard
+always highlights the affected projects and keeps a `●' marker and a
+\"new\" header-line count until the items are acknowledged
+\(`project-overview-github-mark-seen', bound to `M').
+
+Set to `message' (the default) to echo a one-line summary, `all' to
+also raise a desktop notification via `notifications-notify' when
+available, or nil to report nothing beyond the dashboard markers."
+  :type '(choice (const :tag "Echo area summary" message)
+                 (const :tag "Echo area and desktop notification" all)
+                 (const :tag "No notification" nil))
   :group 'project-overview)
 
 (defcustom project-overview-melpa-fallback t
@@ -415,12 +448,19 @@ reset.  A missing or unreadable file yields an empty store."
   (project-overview--cache-load)
   (plist-get project-overview--cache-store key))
 
+(defun project-overview--cache-put-many (pairs)
+  "Store each (KEY . VALUE) in PAIRS and persist the cache once.
+Saves one write when several related keys change together, as when a
+GitHub fetch updates the counts, the seen baseline and the unread list."
+  (project-overview--cache-load)
+  (dolist (pair pairs)
+    (setq project-overview--cache-store
+          (plist-put project-overview--cache-store (car pair) (cdr pair))))
+  (project-overview--cache-save))
+
 (defun project-overview--cache-put (key value)
   "Store VALUE under KEY in the cache and persist it."
-  (project-overview--cache-load)
-  (setq project-overview--cache-store
-        (plist-put project-overview--cache-store key value))
-  (project-overview--cache-save))
+  (project-overview--cache-put-many (list (cons key value))))
 
 (defun project-overview--cache-fresh-p (time)
   "Return non-nil when TIME (a float-time) is within the cache TTL."
@@ -953,12 +993,27 @@ the dashboard and (in the synchronous path) triggers the fetches."
 
 ;;; GitHub integration
 
+(defface project-overview-github-new
+  '((t :inherit error :weight bold))
+  "Face highlighting projects with unread GitHub issues or pull requests."
+  :group 'project-overview)
+
+(defconst project-overview--github-items 20
+  "Number of newest open issues and PRs fetched per repository.
+The newest items are what a fresh fetch compares against the stored
+high-water numbers, so newly raised items can be spotted and named.")
+
 (defconst project-overview--github-query
-  (concat "query($o:String!,$n:String!){"
-          "repository(owner:$o,name:$n){"
-          "issues(states:OPEN){totalCount} "
-          "pullRequests(states:OPEN){totalCount}}}")
-  "GraphQL query fetching open issue and PR counts for one repository.")
+  (format (concat "query($o:String!,$n:String!){"
+                  "repository(owner:$o,name:$n){"
+                  "issues(states:OPEN,first:%d,"
+                  "orderBy:{field:CREATED_AT,direction:DESC})"
+                  "{totalCount nodes{number title}} "
+                  "pullRequests(states:OPEN,first:%d,"
+                  "orderBy:{field:CREATED_AT,direction:DESC})"
+                  "{totalCount nodes{number title}}}}")
+          project-overview--github-items project-overview--github-items)
+  "GraphQL query fetching open issue/PR counts and the newest items.")
 
 (defun project-overview--github-cache-get (slug)
   "Return (ISSUES PRS) cached for SLUG when still fresh, else nil."
@@ -966,15 +1021,72 @@ the dashboard and (in the synchronous path) triggers the fetches."
     (when (and entry (project-overview--cache-fresh-p (nth 0 entry)))
       (list (nth 1 entry) (nth 2 entry)))))
 
-(defun project-overview--github-cache-put (slug issues prs)
-  "Store ISSUES and PRS for SLUG in the persistent cache, stamped now."
-  (let* ((gh (project-overview--cache-get :github))
+(defun project-overview--github-seen (slug)
+  "Return the (ISSUE . PR) high-water numbers already seen for SLUG.
+Each is the highest issue/PR number observed at the previous fetch, so
+an open item numbered above it was raised since then."
+  (cdr (assoc slug (project-overview--cache-get :github-seen))))
+
+(defun project-overview--github-unread (slug)
+  "Return the unread new (KIND NUMBER TITLE) items recorded for SLUG."
+  (cdr (assoc slug (project-overview--cache-get :github-unread))))
+
+(defun project-overview--github-node-max (nodes)
+  "Return the highest item number among NODES, or 0 when there are none."
+  (let ((max 0))
+    (dolist (node nodes max)
+      (let ((num (alist-get 'number node)))
+        (when (and (integerp num) (> num max))
+          (setq max num))))))
+
+(defun project-overview--github-new-nodes (kind nodes high)
+  "Return (KIND NUMBER TITLE) entries for NODES numbered above HIGH."
+  (delq nil
+        (mapcar (lambda (node)
+                  (let ((num (alist-get 'number node)))
+                    (when (and (integerp num) (> num high))
+                      (list kind num (or (alist-get 'title node) "")))))
+                nodes)))
+
+(defun project-overview--github-record (slug issues prs issue-nodes pr-nodes)
+  "Record a fresh fetch of SLUG and return the newly raised items.
+ISSUES and PRS are the open counts; ISSUE-NODES and PR-NODES the newest
+open items from `project-overview--github-query'.  Persists the counts,
+advances the per-kind high-water numbers, and appends any item numbered
+above the old high-water to the unread list.  The first fetch for a
+repository only sets the baseline, so pre-existing items are not
+reported.  Returns the new (KIND NUMBER TITLE) items, or nil."
+  (let* ((seen (project-overview--cache-get :github-seen))
+         (prior (cdr (assoc slug seen)))
+         (gh (project-overview--cache-get :github))
+         (unread (project-overview--cache-get :github-unread))
          (entry (assoc slug gh))
-         (val (list (float-time) issues prs)))
+         (val (list (float-time) issues prs))
+         (imax (project-overview--github-node-max issue-nodes))
+         (pmax (project-overview--github-node-max pr-nodes))
+         (new (and prior
+                   (append
+                    (project-overview--github-new-nodes 'issue issue-nodes
+                                                        (car prior))
+                    (project-overview--github-new-nodes 'pr pr-nodes
+                                                        (cdr prior))))))
     (if entry
         (setcdr entry val)
       (setq gh (cons (cons slug val) gh)))
-    (project-overview--cache-put :github gh)))
+    (let ((sentry (assoc slug seen)))
+      (if sentry
+          (setcdr sentry (cons (max (or (car prior) 0) imax)
+                               (max (or (cdr prior) 0) pmax)))
+        (setq seen (cons (cons slug (cons imax pmax)) seen))))
+    (when new
+      (let ((uentry (assoc slug unread)))
+        (if uentry
+            (setcdr uentry (append (cdr uentry) new))
+          (setq unread (cons (cons slug new) unread)))))
+    (project-overview--cache-put-many
+     (list (cons :github gh) (cons :github-seen seen)
+           (cons :github-unread unread)))
+    new))
 
 (defun project-overview--github-set (root issues prs)
   "Set ROOT's cached :gh counts in the live data without redrawing."
@@ -987,11 +1099,76 @@ the dashboard and (in the synchronous path) triggers the fetches."
   (project-overview--github-set root issues prs)
   (project-overview--redraw))
 
+(defvar project-overview--github-notify-queue nil
+  "Alist of (ROOT . ITEMS) awaiting a coalesced new-item announcement.
+Concurrent asynchronous fetches push here so that a single echo-area
+message can report everything they found.")
+
+(defvar project-overview--github-notify-timer nil
+  "Timer flushing `project-overview--github-notify-queue', or nil.")
+
+(defconst project-overview--github-notify-delay 1.0
+  "Seconds to wait for further fetch results before announcing new items.")
+
+(defun project-overview--github-project-name (root)
+  "Return the display name of project ROOT."
+  (or (plist-get (cdr (assoc root project-overview--cache)) :name)
+      (file-name-nondirectory (directory-file-name root))))
+
+(defun project-overview--github-item-label (item)
+  "Return a short label for new-item ITEM, a (KIND NUMBER TITLE) list."
+  (let ((title (nth 2 item)))
+    (format "#%d %s%s" (nth 1 item)
+            (if (eq (car item) 'pr) "PR" "issue")
+            (if (or (null title) (string-empty-p title))
+                ""
+              (format " %s" (truncate-string-to-width title 40 nil nil "…"))))))
+
+(defun project-overview--github-notify-flush ()
+  "Announce the queued new GitHub items and clear the queue."
+  (setq project-overview--github-notify-timer nil)
+  (let ((queue (nreverse project-overview--github-notify-queue)))
+    (setq project-overview--github-notify-queue nil)
+    (when queue
+      (let* ((total (apply #'+ (mapcar (lambda (e) (length (cdr e))) queue)))
+             (body (mapconcat
+                    (lambda (entry)
+                      (format "%s — %s"
+                              (project-overview--github-project-name (car entry))
+                              (mapconcat #'project-overview--github-item-label
+                                         (cdr entry) ", ")))
+                    queue "; ")))
+        (message "%s" (format "GitHub: %d new item%s — %s"
+                              total (if (= total 1) "" "s") body))
+        (when (and (eq project-overview-github-notify 'all)
+                   (fboundp 'notifications-notify))
+          (ignore-errors
+            (notifications-notify
+             :title (format "Project Overview: %d new GitHub item%s"
+                            total (if (= total 1) "" "s"))
+             :body body
+             :app-name "project-overview")))))))
+
+(defun project-overview--github-notify (root items)
+  "Queue ITEMS newly raised in ROOT for a coalesced announcement.
+Does nothing when notifications are disabled; otherwise restarts a short
+timer so fetch results arriving together produce a single message."
+  (when (and project-overview-github-notify items)
+    (let ((entry (assoc root project-overview--github-notify-queue)))
+      (if entry
+          (setcdr entry (append (cdr entry) items))
+        (push (cons root items) project-overview--github-notify-queue)))
+    (when (timerp project-overview--github-notify-timer)
+      (cancel-timer project-overview--github-notify-timer))
+    (setq project-overview--github-notify-timer
+          (run-with-timer project-overview--github-notify-delay nil
+                          #'project-overview--github-notify-flush))))
+
 (defun project-overview--github-fetch (root owner repo)
   "Asynchronously fetch open issue/PR counts for OWNER/REPO of ROOT.
-Runs \"gh api graphql\" and, on success, caches the counts and calls
-`project-overview--github-update'.  Does nothing when gh is missing or
-OWNER/REPO are unknown."
+Runs \"gh api graphql\" and, on success, records the counts and the
+newest items, flags any newly raised ones, and redraws the dashboard.
+Does nothing when gh is missing or OWNER/REPO are unknown."
   (when (and (executable-find "gh")
              (stringp owner) (not (string-empty-p owner))
              (stringp repo) (not (string-empty-p repo)))
@@ -1017,16 +1194,23 @@ OWNER/REPO are unknown."
                        (goto-char (point-min))
                        (ignore-errors
                          (let* ((data (json-parse-buffer :object-type 'alist
+                                                         :array-type 'list
                                                          :null-object nil))
                                 (r (alist-get 'repository
                                               (alist-get 'data data))))
                            (when r
-                             (let ((issues (alist-get 'totalCount
-                                                      (alist-get 'issues r)))
-                                   (prs (alist-get 'totalCount
-                                                   (alist-get 'pullRequests r))))
-                               (project-overview--github-cache-put slug issues prs)
-                               (project-overview--github-update root issues prs)))))))
+                             (let* ((issues (alist-get 'issues r))
+                                    (prs (alist-get 'pullRequests r))
+                                    (icount (alist-get 'totalCount issues))
+                                    (pcount (alist-get 'totalCount prs))
+                                    (new (project-overview--github-record
+                                          slug icount pcount
+                                          (alist-get 'nodes issues)
+                                          (alist-get 'nodes prs))))
+                               (project-overview--github-update
+                                root icount pcount)
+                               (when new
+                                 (project-overview--github-notify root new))))))))
                  (when (buffer-live-p (process-buffer proc))
                    (kill-buffer (process-buffer proc)))))))
         (error (when (buffer-live-p buf) (kill-buffer buf)))))))
@@ -1056,17 +1240,36 @@ repository is re-queried.  No-op unless `project-overview-show-github'."
                     (project-overview--github-fetch (car cell) owner repo))))))))
       (when redrew (project-overview--redraw)))))
 
+(defun project-overview--github-git-slug (git)
+  "Return \"owner/repo\" from the git info plist GIT when it is GitHub.
+Returns nil when GIT has no complete GitHub owner/repo pair."
+  (when (equal (plist-get git :host) "github")
+    (let ((owner (plist-get git :owner))
+          (repo (plist-get git :repo)))
+      (when (and (stringp owner) (not (string-empty-p owner))
+                 (stringp repo) (not (string-empty-p repo)))
+        (concat owner "/" repo)))))
+
 (defun project-overview--github-slug (root)
   "Return \"owner/repo\" for ROOT when it is a GitHub repo, else nil.
 Uses the cached git info, falling back to a fresh probe of ROOT."
-  (let ((git (or (plist-get (cdr (assoc root project-overview--cache)) :git)
-                 (project-overview--git-info root))))
-    (when (equal (plist-get git :host) "github")
-      (let ((owner (plist-get git :owner))
-            (repo (plist-get git :repo)))
-        (when (and (stringp owner) (not (string-empty-p owner))
-                   (stringp repo) (not (string-empty-p repo)))
-          (concat owner "/" repo))))))
+  (project-overview--github-git-slug
+   (or (plist-get (cdr (assoc root project-overview--cache)) :git)
+       (project-overview--git-info root))))
+
+(defun project-overview--github-cell-unread (cell)
+  "Return the unread new GitHub items recorded for cache CELL."
+  (let ((slug (project-overview--github-git-slug
+               (plist-get (cdr cell) :git))))
+    (and slug (project-overview--github-unread slug))))
+
+(defun project-overview--github-unread-count (&optional cells)
+  "Return the number of unread new GitHub items across CELLS.
+CELLS defaults to `project-overview--cache'."
+  (let ((n 0))
+    (dolist (cell (or cells project-overview--cache) n)
+      (let ((items (project-overview--github-cell-unread cell)))
+        (when items (setq n (+ n (length items))))))))
 
 (defun project-overview--github-body (body)
   "Convert issue/PR BODY (GitHub Markdown) to a safe Org fragment.
@@ -1203,6 +1406,28 @@ KIND is the symbol `issue' or `pr'.  Runs the gh CLI synchronously."
   (interactive)
   (project-overview--github-list 'pr))
 
+(defun project-overview-github-mark-seen (&optional all)
+  "Acknowledge new GitHub issues and PRs, clearing the new-activity markers.
+Marks the project under point as seen; with a prefix argument ALL,
+marks every project.  The markers disappear from the project name, the
+GitHub column, the header-line count and the new-activity filter."
+  (interactive "P")
+  (let* ((unread (project-overview--cache-get :github-unread))
+         (slug (unless all
+                 (project-overview--github-slug (project-overview--root))))
+         (n (if all
+                (apply #'+ (mapcar (lambda (e) (length (cdr e))) unread))
+              (length (cdr (assoc slug unread))))))
+    (when (zerop n)
+      (user-error "No new GitHub items to mark as seen"))
+    (if all
+        (project-overview--cache-put :github-unread nil)
+      (project-overview--cache-put :github-unread
+                                   (assoc-delete-all slug unread)))
+    (project-overview--redraw)
+    (message "Marked %d new GitHub item%s as seen"
+             n (if (= n 1) "" "s"))))
+
 ;;; Rendering
 
 (defun project-overview--git-flag (git)
@@ -1229,17 +1454,20 @@ Empty until the asynchronous fetch fills in :gh.  The issue count
 occupies a fixed-width field so the PR count keeps the same position
 across rows even when a project has no open issues (e.g. \"   1p\"); a
 project with neither shows blank.  Non-zero counts use the `warning'
-face."
+face, and a project with unread new items is flagged with a leading
+`●' in the `project-overview-github-new' face."
   (let ((gh (plist-get (cdr cell) :gh)))
     (if (not gh)
         ""
-      (let ((issues (or (car gh) 0))
-            (prs (or (cdr gh) 0)))
-        (if (and (= issues 0) (= prs 0))
+      (let* ((issues (or (car gh) 0))
+             (prs (or (cdr gh) 0))
+             (unread (project-overview--github-cell-unread cell)))
+        (if (and (= issues 0) (= prs 0) (not unread))
             ""
           (let* ((istr (if (> issues 0) (format "%di" issues) ""))
                  (pstr (if (> prs 0) (format "%dp" prs) "")))
             (concat
+             (if unread (propertize "● " 'face 'project-overview-github-new) "")
              (if (> issues 0) (propertize istr 'face 'warning) istr)
              (make-string (max 0 (- 3 (length istr))) ?\s)
              (if (> prs 0) (propertize pstr 'face 'warning) pstr))))))))
@@ -1249,9 +1477,12 @@ face."
    (list 'name        '("Project" 24 t)
          (lambda (c)
            (let ((name (plist-get (cdr c) :name)))
-             (if (project-overview--filter-dirty c)
-                 (propertize name 'face 'bold)
-               name))))
+             (cond
+              ((project-overview--github-cell-unread c)
+               (propertize name 'face 'project-overview-github-new))
+              ((project-overview--filter-dirty c)
+               (propertize name 'face 'bold))
+              (t name)))))
    (list 'version     '("Version" 8 t)
          (lambda (c) (plist-get (cdr c) :version)))
    (list 'changelog   '("ChangeLog" 11 t)
@@ -1576,6 +1807,7 @@ scanned cache; the only fresh work is a couple of cheap local reads."
          (web (project-overview--remote-web-url
                (project-overview--remote-url root)))
          (gh (plist-get p :gh))
+         (unread (project-overview--github-cell-unread cell))
          (open-bugs (project-overview--open-bug-titles root))
          (commits (project-overview--recent-commits root 10))
          (buf (get-buffer-create (format "*Project: %s*" name))))
@@ -1619,12 +1851,27 @@ scanned cache; the only fresh work is a couple of cheap local reads."
                         (or (plist-get p :open) 0)
                         (or (plist-get p :total) 0)))
         (when gh
-          (insert (format ":GITHUB:   %d issues, %d PRs\n"
-                          (or (car gh) 0) (or (cdr gh) 0))))
+          (insert (format ":GITHUB:   %d issues, %d PRs%s\n"
+                          (or (car gh) 0) (or (cdr gh) 0)
+                          (if unread (format "  (%d new)" (length unread)) ""))))
         (insert (format ":KNOWN:    %s\n" (if (plist-get p :known) "yes" "no")))
         (insert (format ":MELPA:    %s\n" (if (plist-get p :melpa) "yes" "no")))
         (when web (insert (format ":URL:      %s\n" web)))
         (insert ":END:\n\n")
+        (when unread
+          (insert (format "* New GitHub activity (%d)\n" (length unread)))
+          (dolist (item unread)
+            (let* ((pr (eq (car item) 'pr))
+                   (num (nth 1 item))
+                   (title (or (nth 2 item) ""))
+                   (url (and web (format "%s/%s/%d" web
+                                         (if pr "pull" "issues") num))))
+              (insert (if url
+                          (format "- [[%s][%s #%d: %s]]\n" url
+                                  (if pr "PR" "Issue") num title)
+                        (format "- %s #%d: %s\n"
+                                (if pr "PR" "Issue") num title)))))
+          (insert "\n"))
         (insert (format "* Open bugs (%d)\n" (length open-bugs)))
         (if open-bugs
             (dolist (b open-bugs) (insert "- " b "\n"))
@@ -2030,6 +2277,10 @@ The `:gh' counts are nil until fetched, in which case CELL is dropped."
     (and gh (or (> (or (car gh) 0) 0)
                 (> (or (cdr gh) 0) 0)))))
 
+(defun project-overview--filter-github-new (cell)
+  "Keep CELL when it has unread new GitHub issues or pull requests."
+  (project-overview--github-cell-unread cell))
+
 (defun project-overview--apply-filter (label predicate)
   "Filter the dashboard to projects matching PREDICATE, described by LABEL.
 A nil PREDICATE clears the filter.  Updates the mode line with the
@@ -2092,6 +2343,12 @@ shown/total counts and redraws."
   (project-overview--apply-filter "GitHub issues/PRs"
                                   #'project-overview--filter-github))
 
+(defun project-overview-filter-github-new ()
+  "Show only projects with new (unread) GitHub issues or pull requests."
+  (interactive)
+  (project-overview--apply-filter "new GitHub"
+                                  #'project-overview--filter-github-new))
+
 (defun project-overview-filter-clear ()
   "Clear any active filter and show every project."
   (interactive)
@@ -2126,7 +2383,8 @@ shown/total counts and redraws."
     ("B" "bugs agenda"       project-overview-bugs-agenda)
     ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)
     ("i" "GitHub issues"     project-overview-github-issues)
-    ("P" "GitHub PRs"        project-overview-github-prs)]
+    ("P" "GitHub PRs"        project-overview-github-prs)
+    ("M" "mark GitHub seen"  project-overview-github-mark-seen)]
    ["VC & search"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
@@ -2178,6 +2436,7 @@ be hidden or shown without switching layouts."
    ("o" "owned by me"                 project-overview-filter-owned)
    ("m" "on MELPA"                    project-overview-filter-melpa)
    ("g" "with GitHub issues/PRs"      project-overview-filter-github)
+   ("N" "with new GitHub activity"    project-overview-filter-github-new)
    ("n" "matching a name regexp…"     project-overview-filter-name)]
   ["Filter"
    ("/" "all (clear filter)"          project-overview-filter-clear)
@@ -2237,6 +2496,10 @@ screen), and the filter name is appended."
          (concat
           (project-overview--header-count (car gh) "iss")
           (project-overview--header-count (cdr gh) "PR"))))
+     (let ((new (project-overview--github-unread-count cache)))
+       (when (> new 0)
+         (concat " · " (propertize (format "%d new" new)
+                                   'face 'project-overview-github-new))))
      (when project-overview--filter
        (format " ⦅%s⦆" (car project-overview--filter)))
      (when (project-overview--scan-active-p)
@@ -2284,6 +2547,7 @@ screen), and the filter name is appended."
     (define-key map "A" #'project-overview-bugs-agenda-all)
     (define-key map "i" #'project-overview-github-issues)
     (define-key map "P" #'project-overview-github-prs)
+    (define-key map "M" #'project-overview-github-mark-seen)
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
     (define-key map "V" #'project-overview-cycle-view)

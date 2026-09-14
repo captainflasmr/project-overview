@@ -1,5 +1,14 @@
 #+TITLE: Changelog for project-overview
 
+* [0.8.0] - 2026-09-14
+** Added
+- New GitHub activity detection and highlighting.  Whenever a repository's GitHub data is re-fetched (a forced pull, or the first fetch after the cache expires), the newest open issues and PRs are compared with the numbers seen at the previous fetch — kept in the persistent cache, so detection works across restarts.  Projects with newly raised items are highlighted: the project name in the new ~project-overview-github-new~ face, a ~●~ marker in the ~GitHub~ column, a ~N new~ count in the header line, and a "New GitHub activity" section (with links) in the detail card (~.~).  Items stay flagged until acknowledged with ~M~ (~project-overview-github-mark-seen~; ~C-u M~ marks every project).
+- ~project-overview-github-notify~: how newly raised GitHub issues/PRs are announced — ~message~ (the default) for a one-line echo-area summary, ~all~ to also raise a desktop notification via ~notifications-notify~ when available, or ~nil~ for the dashboard markers only.  Results from concurrent asynchronous fetches are coalesced into a single summary.
+- New filter ~/ N~ (~project-overview-filter-github-new~): show only projects with new (unread) GitHub activity.
+** Changed
+- The GitHub GraphQL query now also fetches the newest open issues and PRs (number and title), not just their open counts, which is what the new-activity detection compares against.
+- The ~?~ dispatch (~project-overview-dispatch~) gains ~M~ to mark the project's new GitHub items as seen.
+
 * [0.7.0] - 2026-06-16
 ** Added
 - ~project-overview-pull-repos~: run a real ~git pull~ over every repository in the dashboard, a few at a time (~project-overview-pull-jobs~, default 4) on background processes so Emacs stays responsive.  Only repositories with a configured remote are pulled, using ~project-overview-pull-args~ (~--ff-only~ by default, so a batch never stops to resolve a merge).  When the batch finishes the dashboard is re-scanned and any failures are collected in a ~*Project pull*~ side buffer.  Reachable from the cache/pull transient (~r g~).
