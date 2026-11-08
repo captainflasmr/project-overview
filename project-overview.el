@@ -67,7 +67,6 @@
 ;;   w        browse remote in browser A  TODO agenda for all projects' bugs
 ;;                                     /  filter the view (transient)
 ;;                                     g  refresh (re-scan)
-;;                                     r  cache / pull (transient)
 ;;                                     ?  transient menu of all actions
 ;;                                     V  cycle column layout
 ;;                                     i  open GitHub issues (Org buffer)
@@ -106,14 +105,14 @@
 ;; Network data — the MELPA package list and per-repository GitHub
 ;; issue/PR counts — is cached on disk in `project-overview-cache-file'
 ;; with a `project-overview-cache-ttl' lifetime, so it survives restarts
-;; and an ordinary refresh (`g') need not hit the network.  `r'
-;; (`project-overview-cache-dispatch') force-pulls fresh GitHub counts,
-;; the MELPA list, or everything, and can clear the cache.  The same
-;; transient also runs a real \"git pull\" over the working trees:
-;; `project-overview-pull-repos' (`r g') pulls every repository with a
-;; remote a few at a time (`project-overview-pull-args', \"--ff-only\" by
-;; default), and `r u' pulls just the project under point, re-scanning
-;; the dashboard when the pulls finish.
+;; and an ordinary refresh (`g') need not hit the network.  The `?'
+;; dispatch exposes the cache and pull commands at its top level: `p'
+;; force-refreshes the GitHub counts, `L' the MELPA list, `a'
+;; everything, while `G' runs a real \"git pull\" over every repository
+;; with a remote a few at a time (`project-overview-pull-args',
+;; \"--ff-only\" by default) and `u' pulls just the project under point,
+;; re-scanning the dashboard when the pulls finish; `c' clears the
+;; on-disk cache.
 ;;
 ;; Whenever a repository's GitHub data is re-fetched (a forced pull, or
 ;; the first fetch after the cache expires), the newest open issues and
@@ -257,8 +256,8 @@ current session only."
   "Seconds a cached network result stays fresh before being re-fetched.
 Applies to the MELPA package list and to per-repository GitHub counts.
 A normal refresh (\\[project-overview-refresh]) reuses cached data
-while it is fresh; the pull commands in `project-overview-cache-dispatch'
-force a re-fetch regardless."
+while it is fresh; the force-refresh commands in
+`project-overview-dispatch' re-fetch regardless."
   :type 'integer
   :group 'project-overview)
 
@@ -1950,8 +1949,8 @@ commands (such as \"g\") keep the same BUGS.org scope and alignment."
 (defun project-overview-refresh ()
   "Re-scan all projects and redraw the dashboard.
 Local project data is re-read; network data (GitHub counts, the MELPA
-list) is taken from the cache while it is fresh.  Use
-`project-overview-cache-dispatch' to force a network refresh."
+list) is taken from the cache while it is fresh.  Use the cache/pull
+commands in `project-overview-dispatch' to force a network refresh."
   (interactive)
   (message "Scanning projects…")
   (project-overview--rescan)
@@ -2151,20 +2150,6 @@ re-scanned and any failures are listed in a side buffer."
       (user-error "This project has no git remote to pull"))
     (project-overview--pull-start (list root))))
 
-;;;###autoload (autoload 'project-overview-cache-dispatch "project-overview" nil t)
-(transient-define-prefix project-overview-cache-dispatch ()
-  "Refresh or clear the dashboard's cached network data."
-  ["Pull (force re-fetch, bypassing the cache)"
-   ("p" "GitHub counts" project-overview-pull-github)
-   ("m" "MELPA list"    project-overview-pull-melpa)
-   ("a" "everything"    project-overview-pull-all)]
-  ["Git pull (working trees)"
-   ("g" "all repositories" project-overview-pull-repos)
-   ("u" "project at point"  project-overview-pull-repo)]
-  ["Cache"
-   ("c" "clear on-disk cache" project-overview-cache-clear)
-   ("q" "quit"                transient-quit-one)])
-
 ;;; Filtering
 
 (defun project-overview--filter-dirty (cell)
@@ -2304,13 +2289,18 @@ shown/total counts and redraws."
    ["VC"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
-    ("w" "browse remote"     project-overview-browse-remote)
-    ("p" "git pull"          project-overview-pull-repo)]
+    ("w" "browse remote"     project-overview-browse-remote)]
+   ["Cache & pull"
+    ("p" "GitHub counts"      project-overview-pull-github)
+    ("L" "MELPA list"         project-overview-pull-melpa)
+    ("a" "everything"         project-overview-pull-all)
+    ("G" "pull all repos"     project-overview-pull-repos)
+    ("u" "pull this project"  project-overview-pull-repo)
+    ("c" "clear cache"        project-overview-cache-clear)]
    ["Dashboard"
     ("/" "filter…"        project-overview-filter-dispatch)
     ("V" "cycle view"     project-overview-cycle-view :transient t)
     ("g" "refresh"        project-overview-refresh :transient t)
-    ("r" "cache / pull…"  project-overview-cache-dispatch)
     ("q" "quit"           transient-quit-one)]])
 
 (defun project-overview-cycle-view (&optional backward)
@@ -2447,7 +2437,6 @@ screen), and the filter name is appended."
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
     (define-key map "V" #'project-overview-cycle-view)
-    (define-key map "r" #'project-overview-cache-dispatch)
     ;; Ergonomic column navigation (the inherited bindings are M-left/right).
     (define-key map (kbd "TAB") #'tabulated-list-next-column)
     (define-key map (kbd "<backtab>") #'tabulated-list-previous-column)

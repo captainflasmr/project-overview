@@ -86,8 +86,8 @@
 ;;   C changelog · R README · b BUGS · i/P GitHub issues/PRs
 ;;   M mark new GitHub items seen (C-u M for all projects)
 ;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "N" new GitHub)
-;;   V cycle view · g refresh · r cache/pull
-;;   ? all actions · TAB / S-TAB move between columns
+;;   V cycle view · g refresh
+;;   ? all actions (incl. cache/pull) · TAB / S-TAB move between columns
 
 (provide 'example-init)
 ;;; example-init.el ends here
