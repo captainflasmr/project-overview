@@ -56,21 +56,19 @@
 ;; row (`tabulated-list-next-column' / `tabulated-list-previous-column').
 ;;
 ;; Single keys act on the project under point, reusing project.el where
-;; possible.  See `project-overview-mode-map' for the full set:
-;;
-;; Keys mirroring the `project-switch-project' menu act on the project
-;; under point:
+;; possible.  `RET' / `o' opens the full `project-switch-project' menu;
+;; the other keys are listed below.  See `project-overview-mode-map'
+;; for the full set:
 ;;
 ;;   RET / o  switch to project        .  detail card (window right)
-;;   f        find file                c  preview latest CHANGELOG entry
-;;   G        find regexp              C  open CHANGELOG.org (window right)
-;;   d        find directory           R  open README (window right)
-;;   e        eshell                   b  open BUGS.org (window right)
-;;   v/SPC    vc-dir                   A  TODO agenda for all projects' bugs
-;;   m        magit-status             /  filter the view (transient)
-;;   D        dired at root            g  refresh (re-scan)
-;;   !        shell at root            r  cache / pull (transient)
-;;   w        browse remote in browser ?  transient menu of all actions
+;;   D        dired at root            C  open CHANGELOG.org (window right)
+;;   v/SPC    vc-dir                   R  open README (window right)
+;;   m        magit-status             b  open BUGS.org (window right)
+;;   w        browse remote in browser A  TODO agenda for all projects' bugs
+;;                                     /  filter the view (transient)
+;;                                     g  refresh (re-scan)
+;;                                     r  cache / pull (transient)
+;;                                     ?  transient menu of all actions
 ;;                                     V  cycle column layout
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
@@ -1671,12 +1669,6 @@ When FORWARD is non-nil move downward, otherwise upward."
   (interactive)
   (project-switch-project (project-overview--root)))
 
-(defun project-overview-find-file ()
-  "Run `project-find-file' in the project under point."
-  (interactive)
-  (let ((default-directory (project-overview--root)))
-    (project-find-file)))
-
 (defun project-overview-magit ()
   "Open `magit-status' for the project under point."
   (interactive)
@@ -1700,14 +1692,8 @@ Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
   (interactive)
   (dired (project-overview--root)))
 
-(defun project-overview-shell ()
-  "Open a shell rooted at the project under point."
-  (interactive)
-  (let ((default-directory (project-overview--root)))
-    (if (fboundp 'project-shell) (project-shell) (shell))))
-
-;; The following commands mirror the entries on the `project-switch-project'
-;; menu, applied to the project under point.  Each runs the standard
+;; The following command mirrors an entry on the `project-switch-project'
+;; menu, applied to the project under point.  It runs the standard
 ;; project.el command with the project context bound to that root.
 
 (defun project-overview--run-project-command (command)
@@ -1717,25 +1703,10 @@ Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
          (project-current-directory-override root))
     (call-interactively command)))
 
-(defun project-overview-find-regexp ()
-  "Run `project-find-regexp' in the project under point."
-  (interactive)
-  (project-overview--run-project-command #'project-find-regexp))
-
-(defun project-overview-find-dir ()
-  "Run `project-find-dir' in the project under point."
-  (interactive)
-  (project-overview--run-project-command #'project-find-dir))
-
 (defun project-overview-vc-dir ()
   "Run `project-vc-dir' in the project under point."
   (interactive)
   (project-overview--run-project-command #'project-vc-dir))
-
-(defun project-overview-eshell ()
-  "Run `project-eshell' in the project under point."
-  (interactive)
-  (project-overview--run-project-command #'project-eshell))
 
 (defun project-overview-changelog ()
   "Visit CHANGELOG.org of the project under point in a window to the right."
@@ -1975,38 +1946,6 @@ commands (such as \"g\") keep the same BUGS.org scope and alignment."
   (let ((files (project-overview--bugs-files)))
     (unless files (user-error "No BUGS.org files found in any project"))
     (project-overview--bugs-agenda files)))
-
-(defun project-overview-changelog-preview ()
-  "Preview the latest CHANGELOG.org entry for the project under point.
-The entry is shown read-only in a right-hand side window."
-  (interactive)
-  (let ((f (expand-file-name "CHANGELOG.org" (project-overview--root)))
-        text)
-    (unless (file-readable-p f) (user-error "No CHANGELOG.org in this project"))
-    (with-temp-buffer
-      (insert-file-contents f)
-      (goto-char (point-min))
-      (when (re-search-forward "^\\*\\* " nil t)
-        (beginning-of-line)
-        (let ((start (point)))
-          (forward-line 1)
-          (if (re-search-forward "^\\*\\* " nil t)
-              (beginning-of-line)
-            (goto-char (point-max)))
-          (setq text (buffer-substring start (point))))))
-    (let ((buf (get-buffer-create "*Project CHANGELOG*")))
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert (or text "No entries"))
-          (goto-char (point-min))
-          ;; Activate Org fully (run `org-mode-hook', fontify, etc.) so the
-          ;; preview looks like a normal Org buffer.
-          (org-mode)
-          (font-lock-ensure)
-          (visual-line-mode 1)
-          (view-mode 1)))
-      (project-overview--display-side buf))))
 
 (defun project-overview-refresh ()
   "Re-scan all projects and redraw the dashboard.
@@ -2351,15 +2290,9 @@ shown/total counts and redraws."
    (lambda () (concat "Project: " (or (project-overview--menu-name) "(none)")))
    ["Find"
     ("o" "switch to project" project-overview-open)
-    ("f" "find file"         project-overview-find-file)
-    ("G" "find regexp"       project-overview-find-regexp)
-    ("d" "find directory"    project-overview-find-dir)
-    ("e" "eshell"            project-overview-eshell)
-    ("D" "dired"             project-overview-dired)
-    ("!" "shell"             project-overview-shell)]
+    ("D" "dired"             project-overview-dired)]
    ["Inspect"
     ("." "detail card"       project-overview-show-detail)
-    ("c" "preview changelog" project-overview-changelog-preview)
     ("C" "CHANGELOG.org"     project-overview-changelog)
     ("R" "README"            project-overview-readme)
     ("b" "BUGS.org"          project-overview-bugs-file)
@@ -2494,19 +2427,13 @@ screen), and the filter name is appended."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'project-overview-open)
     (define-key map "o" #'project-overview-open)
-    ;; Project actions mirroring the `project-switch-project' menu.
-    (define-key map "f" #'project-overview-find-file)
-    (define-key map "G" #'project-overview-find-regexp)
-    (define-key map "d" #'project-overview-find-dir)
+    ;; VC, remote & dired.
     (define-key map "v" #'project-overview-vc-dir)
-    (define-key map "e" #'project-overview-eshell)
     (define-key map "m" #'project-overview-magit)
     (define-key map "w" #'project-overview-browse-remote)
     (define-key map "p" #'previous-line)
     (define-key map "D" #'project-overview-dired)
-    (define-key map "!" #'project-overview-shell)
     ;; Inspect.
-    (define-key map "c" #'project-overview-changelog-preview)
     (define-key map "C" #'project-overview-changelog)
     (define-key map "R" #'project-overview-readme)
     (define-key map "." #'project-overview-show-detail)

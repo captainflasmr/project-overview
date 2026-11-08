@@ -43,21 +43,15 @@ The mode line shows the full (abbreviated) path of the project under point, upda
 
 * Actions
 
-Single keys act on the project under point.  The =project.el= actions use the same keys as the =project-switch-project= menu:
+Single keys act on the project under point.  =o= opens the full =project-switch-project= menu for that project, so its file-finding and shell commands are not duplicated here:
 
 | Key         | Action                                        |
 |-------------+-----------------------------------------------|
 | =RET= / =o= | switch to project (=project-switch-project=)  |
-| =f=         | find file (=project-find-file=)               |
-| =G=         | find regexp (=project-find-regexp=)           |
-| =d=         | find directory (=project-find-dir=)           |
 | =v= / =SPC= | =project-vc-dir=                              |
-| =e=         | =project-eshell=                              |
 | =m=         | =magit-status=                                |
 | =D=         | dired at root                                 |
-| =!=         | shell at root                                 |
 | =.=         | detail card in a window to the right          |
-| =c=         | preview latest =CHANGELOG.org= entry          |
 | =C=         | open =CHANGELOG.org= in a window to the right |
 | =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs     |
@@ -110,7 +104,7 @@ Press =.= (=project-overview-show-detail=) to open a per-project "card" in a win
 
 It reuses the already-scanned data, so it is near-instant — handy for a quick "what is going on with this repo?" without switching to it.
 
-All of the right-hand views — the detail card, the changelog preview (=c=), the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the GitHub issue/PR panels (=i=/=P=) — share a single side window: opening another reuses that one window rather than splitting off a new one.  None of them take focus, so point always stays on the dashboard and you can keep moving down the list to flip through projects.
+All of the right-hand views — the detail card, the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the GitHub issue/PR panels (=i=/=P=) — share a single side window: opening another reuses that one window rather than splitting off a new one.  None of them take focus, so point always stays on the dashboard and you can keep moving down the list to flip through projects.
 
 * Scanning
 

@@ -82,8 +82,8 @@
   (project-overview-cache-ttl 86400))
 
 ;; In the dashboard:
-;;   RET/o switch · f find file · m magit · w browse remote · D dired
-;;   c/C changelog · R README · b BUGS · i/P GitHub issues/PRs
+;;   RET/o switch · m magit · w browse remote · D dired
+;;   C changelog · R README · b BUGS · i/P GitHub issues/PRs
 ;;   M mark new GitHub items seen (C-u M for all projects)
 ;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "N" new GitHub)
 ;;   V cycle view · g refresh · r cache/pull
