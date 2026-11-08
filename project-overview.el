@@ -66,14 +66,12 @@
 ;;   G        find regexp              C  open CHANGELOG.org (window right)
 ;;   d        find directory           R  open README (window right)
 ;;   e        eshell                   b  open BUGS.org (window right)
-;;   s        search (ripgrep)         B  TODO agenda for this project's bugs
 ;;   v/SPC    vc-dir                   A  TODO agenda for all projects' bugs
 ;;   m        magit-status             /  filter the view (transient)
 ;;   D        dired at root            g  refresh (re-scan)
 ;;   !        shell at root            r  cache / pull (transient)
 ;;   w        browse remote in browser ?  transient menu of all actions
 ;;                                     V  cycle column layout
-;;                                     t  toggle the Description column
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     P  open GitHub PRs (Org buffer)
 ;;                                     M  mark new GitHub items seen
@@ -148,7 +146,6 @@
 (require 'transient)
 
 (declare-function magit-status "ext:magit" (&optional directory cache))
-(declare-function consult-ripgrep "ext:consult" (&optional dir initial))
 (declare-function org-todo-list "org-agenda" (&optional arg))
 (declare-function org-mode "org" ())
 (declare-function org-display-inline-images "org" (&optional include-linked refresh beg end))
@@ -308,9 +305,8 @@ Must be a key of `project-overview-views'.  When
 
 (defcustom project-overview-show-description nil
   "When non-nil, show the Description column in every view.
-Off by default, since the description is wide; toggle it per buffer
-with `project-overview-toggle-description', which adds or removes the
-column whatever the active view."
+Off by default, since the description is wide.  When enabled the
+column is added to whichever view is active."
   :type 'boolean
   :group 'project-overview)
 
@@ -1538,11 +1534,6 @@ takes precedence over `project-overview-default-view'."
            project-overview-saved-view)
       project-overview-default-view))
 
-(defvar-local project-overview--hide-description nil
-  "When non-nil, omit the Description column whatever the active view.
-Initialised per buffer from `project-overview-show-description' and
-toggled with `project-overview-toggle-description'.")
-
 (defun project-overview--with-description (cols)
   "Return COLS with the Description column present.
 Already-present COLS are returned unchanged; otherwise `description' is
@@ -1560,16 +1551,15 @@ inserted just before `path' when that is shown, else appended."
   "Return the list of column ids for the active view.
 Falls back to the effective default view then the `full' layout when
 the current view is unset or unknown.  The Description column is added
-to (or dropped from) any view according to
-`project-overview--hide-description', so it can be toggled everywhere."
+to any view when `project-overview-show-description' is non-nil."
   (let ((cols (or (cdr (assq (or project-overview--view
                                  (project-overview--effective-default-view))
                              project-overview-views))
                   (cdr (assq 'full project-overview-views))
                   (mapcar #'car project-overview--columns))))
-    (if project-overview--hide-description
-        (remq 'description cols)
-      (project-overview--with-description cols))))
+    (if project-overview-show-description
+        (project-overview--with-description cols)
+      (remq 'description cols))))
 
 (defun project-overview--format ()
   "Return the `tabulated-list-format' vector for the active view."
@@ -1704,13 +1694,6 @@ Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
     (unless web (user-error "No browsable remote for this project"))
     (funcall project-overview-browse-url-function web)
     (message "Opening %s" web)))
-
-(defun project-overview-search ()
-  "Search the project under point (consult-ripgrep if available)."
-  (interactive)
-  (let ((default-directory (project-overview--root)))
-    (call-interactively
-     (if (fboundp 'consult-ripgrep) #'consult-ripgrep #'project-find-regexp))))
 
 (defun project-overview-dired ()
   "Open Dired at the root of the project under point."
@@ -2385,16 +2368,14 @@ shown/total counts and redraws."
     ("i" "GitHub issues"     project-overview-github-issues)
     ("P" "GitHub PRs"        project-overview-github-prs)
     ("M" "mark GitHub seen"  project-overview-github-mark-seen)]
-   ["VC & search"
+   ["VC"
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
     ("w" "browse remote"     project-overview-browse-remote)
-    ("p" "git pull"          project-overview-pull-repo)
-    ("s" "search"            project-overview-search)]
+    ("p" "git pull"          project-overview-pull-repo)]
    ["Dashboard"
     ("/" "filter…"        project-overview-filter-dispatch)
     ("V" "cycle view"     project-overview-cycle-view :transient t)
-    ("t" "toggle description" project-overview-toggle-description :transient t)
     ("g" "refresh"        project-overview-refresh :transient t)
     ("r" "cache / pull…"  project-overview-cache-dispatch)
     ("q" "quit"           transient-quit-one)]])
@@ -2414,17 +2395,6 @@ pressing the key steps through the layouts and stops wherever you like."
            (idx (or (seq-position views current) 0))
            (next (nth (mod (+ idx (if backward -1 1)) n) views)))
       (project-overview-set-view next))))
-
-(defun project-overview-toggle-description ()
-  "Toggle display of the Description column in the dashboard.
-The setting applies on top of the active view, so the description can
-be hidden or shown without switching layouts."
-  (interactive)
-  (setq project-overview--hide-description (not project-overview--hide-description))
-  (project-overview--apply-view)
-  (tabulated-list-print t)
-  (message "Description column %s"
-           (if project-overview--hide-description "hidden" "shown")))
 
 ;;;###autoload (autoload 'project-overview-filter-dispatch "project-overview" nil t)
 (transient-define-prefix project-overview-filter-dispatch ()
@@ -2530,7 +2500,6 @@ screen), and the filter name is appended."
     (define-key map "d" #'project-overview-find-dir)
     (define-key map "v" #'project-overview-vc-dir)
     (define-key map "e" #'project-overview-eshell)
-    (define-key map "s" #'project-overview-search)
     (define-key map "m" #'project-overview-magit)
     (define-key map "w" #'project-overview-browse-remote)
     (define-key map "p" #'previous-line)
@@ -2551,7 +2520,6 @@ screen), and the filter name is appended."
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
     (define-key map "V" #'project-overview-cycle-view)
-    (define-key map "t" #'project-overview-toggle-description)
     (define-key map "r" #'project-overview-cache-dispatch)
     ;; Ergonomic column navigation (the inherited bindings are M-left/right).
     (define-key map (kbd "TAB") #'tabulated-list-next-column)
@@ -2571,8 +2539,6 @@ screen), and the filter name is appended."
   ;; Free the window header line for the aggregate summary by printing the
   ;; (still sortable) column headers at the top of the buffer instead.
   (setq tabulated-list-use-header-line nil)
-  ;; Hide the Description column unless `project-overview-show-description'.
-  (setq project-overview--hide-description (not project-overview-show-description))
   ;; Install the columns for the active view (default
   ;; `project-overview-default-view'), which also sets the sort key —
   ;; most recently committed projects first when the Commit column is shown.

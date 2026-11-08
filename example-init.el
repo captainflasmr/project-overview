@@ -51,8 +51,7 @@
   ;; Remember the last view chosen with `V' (via savehist) and reuse it
   ;; next session.  Default t.
   (project-overview-remember-view t)
-  ;; Show the (wide) Description column on open.  Off by default; toggle
-  ;; per buffer with `t'.
+  ;; Show the (wide) Description column on open.  Off by default.
   (project-overview-show-description nil)
 
   ;; -- GitHub integration (needs the "gh" CLI, authenticated) --
@@ -87,7 +86,7 @@
 ;;   c/C changelog · R README · b BUGS · i/P GitHub issues/PRs
 ;;   M mark new GitHub items seen (C-u M for all projects)
 ;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "N" new GitHub)
-;;   V cycle view · t toggle Description · g refresh · r cache/pull
+;;   V cycle view · g refresh · r cache/pull
 ;;   ? all actions · TAB / S-TAB move between columns
 
 (provide 'example-init)

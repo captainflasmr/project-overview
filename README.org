@@ -53,7 +53,6 @@ Single keys act on the project under point.  The =project.el= actions use the sa
 | =d=         | find directory (=project-find-dir=)           |
 | =v= / =SPC= | =project-vc-dir=                              |
 | =e=         | =project-eshell=                              |
-| =s=         | search (=consult-ripgrep=, else project grep) |
 | =m=         | =magit-status=                                |
 | =D=         | dired at root                                 |
 | =!=         | shell at root                                 |
@@ -143,6 +142,7 @@ By default the dashboard scans *incrementally*: it appears immediately and fills
 - =project-overview-show-github= :: when non-nil (the default), fetch open issue/PR counts for GitHub repositories with the =gh= CLI.
 - =project-overview-github-notify= :: how to announce newly raised GitHub issues and PRs — =message= (the default), =all= (also a desktop notification), or =nil= (dashboard markers only).  See [[GitHub integration]].
 - =project-overview-github-user= :: your GitHub username; its repositories' open issue/PR totals are summarised in the header line and the "owned by me" filter (=/ o=) uses it.
+- =project-overview-show-description= :: when non-nil, show the wide =Description= column in every view (hidden by default).
 
 * Notes
 
