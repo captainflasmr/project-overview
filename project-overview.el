@@ -468,13 +468,26 @@ GitHub fetch updates the counts, the seen baseline and the unread list."
   (setq project-overview--cache-store nil
         project-overview--melpa-cache nil))
 
+(defun project-overview--ensure-project-point ()
+  "Move point to the first project row when it is not on one.
+Leaves point alone when it is already on a project, and when the
+dashboard has no project rows."
+  (unless (tabulated-list-get-id)
+    (let ((pos (point)))
+      (goto-char (point-min))
+      (while (and (not (eobp)) (not (tabulated-list-get-id)))
+        (forward-line 1))
+      (when (eobp)
+        (goto-char pos)))))
+
 (defun project-overview--redraw ()
-  "Reprint the live dashboard buffer in place, keeping point."
+  "Reprint the live dashboard buffer in place, keeping point on a project."
   (let ((buf (get-buffer project-overview-buffer-name)))
     (when (buffer-live-p buf)
       (with-current-buffer buf
         (when (derived-mode-p 'project-overview-mode)
-          (tabulated-list-print t))))))
+          (tabulated-list-print t)
+          (project-overview--ensure-project-point))))))
 
 ;;; Scanning
 
@@ -1610,6 +1623,7 @@ VIEW is a key of `project-overview-views'."
     (project-overview--save-view view))
   (project-overview--apply-view)
   (tabulated-list-print t)
+  (project-overview--ensure-project-point)
   (message "View: %s%s" view
            (if project-overview-remember-view " (saved)" "")))
 
@@ -2201,7 +2215,8 @@ shown/total counts and redraws."
                 (and predicate (format " [%s %d/%d]" label shown total)))
     (force-mode-line-update)
     (when (derived-mode-p 'project-overview-mode)
-      (tabulated-list-print t))
+      (tabulated-list-print t)
+      (project-overview--ensure-project-point))
     (message "Filter: %s — %d/%d project%s"
              label shown total (if (= shown 1) "" "s"))))
 
@@ -2485,9 +2500,7 @@ screen), and the filter name is appended."
       (project-overview-mode)
       (tabulated-list-print)
       ;; Start point on the first project row, past the in-buffer header.
-      (goto-char (point-min))
-      (while (and (not (eobp)) (not (tabulated-list-get-id)))
-        (forward-line 1)))
+      (project-overview--ensure-project-point))
     (pop-to-buffer-same-window buf))
   (if project-overview-async-scan
       (project-overview--rescan)
