@@ -61,6 +61,8 @@ Single keys act on the project under point.  =o= opens the =project-switch-proje
 | =g=         | refresh (re-scan)                             |
 | =?=         | transient menu of all the above               |
 
+With a prefix argument (=C-u=), =v=/=SPC=, =m=, and =D= open their buffers in the right-hand side window.
+
 * Cache and pull
 
 The =?= dispatch also offers cache and network-refresh commands:

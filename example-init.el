@@ -76,6 +76,7 @@
 ;;   RET/o switch · m magit · w browse remote · D dired
 ;;   C changelog · R README · b BUGS · i/r GitHub issues/PRs
 ;;   P pull this project (C-u P pulls all repos)
+;;   C-u v/m/D open in the right-hand side window
 ;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "g" GitHub)
 ;;   V cycle view · g refresh
 ;;   ? all actions (incl. cache/pull) · TAB / S-TAB move between columns

@@ -67,6 +67,9 @@
 ;;                                     i  open GitHub issues (Org buffer)
 ;;                                     r  open GitHub PRs (Org buffer)
 ;;
+;; A prefix argument on `v', `m' or `D' opens the resulting buffer in the
+;; right-hand side window instead of the usual window layout.
+;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream,
 ;; repos owned by `project-overview-github-user', repos available on
@@ -1082,6 +1085,13 @@ which keeps item bodies from breaking the buffer's outline."
       (when in-code (push "#+end_src" out))
       (concat (mapconcat #'identity (nreverse out) "\n") "\n"))))
 
+(defconst project-overview--side-window-action
+  '(display-buffer-in-side-window
+    (side . right)
+    (slot . 0)
+    (window-width . 0.4))
+  "Display action for the shared right-hand side window.")
+
 (defun project-overview--display-side (buffer)
   "Display BUFFER in the shared right-hand side window and return that window.
 All of the dashboard's right-hand views — the detail card, the
@@ -1089,10 +1099,21 @@ CHANGELOG/BUGS/README visits and the GitHub panels — route through
 here so they reuse a single side window (side `right', slot 0)
 rather than splitting off a new window each time.  Focus is never
 moved: it always stays on the project-overview dashboard."
-  (display-buffer buffer '(display-buffer-in-side-window
-                           (side . right)
-                           (slot . 0)
-                           (window-width . 0.4))))
+  (display-buffer buffer project-overview--side-window-action))
+
+(defun project-overview--call-in-side-window (function)
+  "Call FUNCTION with buffers it displays routed to the right-hand side window.
+Unlike `project-overview--display-side', this lets commands that select
+their own buffer (VC-dir, Magit, Dired) place it in the side window and
+keep focus there."
+  (let ((display-buffer-overriding-action project-overview--side-window-action))
+    (funcall function)))
+
+(defun project-overview--maybe-side (side function)
+  "Call FUNCTION, using the right-hand side window when SIDE is non-nil."
+  (if side
+      (project-overview--call-in-side-window function)
+    (funcall function)))
 
 (defun project-overview--github-render (kind slug items)
   "Render ITEMS (issues or PRs) for SLUG into an Org buffer and show it.
@@ -1421,11 +1442,13 @@ Uses the `project-switch-project' command menu."
   (interactive)
   (project-switch-project (project-overview--root)))
 
-(defun project-overview-magit ()
-  "Open `magit-status' for the project under point."
-  (interactive)
+(defun project-overview-magit (&optional side)
+  "Open `magit-status' for the project under point.
+With a prefix argument, display it in the right-hand side window."
+  (interactive "P")
   (if (fboundp 'magit-status)
-      (magit-status (project-overview--root))
+      (let ((root (project-overview--root)))
+        (project-overview--maybe-side side (lambda () (magit-status root))))
     (user-error "Magit is not available")))
 
 (defun project-overview-browse-remote ()
@@ -1439,26 +1462,30 @@ Uses `project-overview-browse-url-function' (e.g. `browse-url-firefox')."
     (funcall project-overview-browse-url-function web)
     (message "Opening %s" web)))
 
-(defun project-overview-dired ()
-  "Open Dired at the root of the project under point."
-  (interactive)
-  (dired (project-overview--root)))
+(defun project-overview-dired (&optional side)
+  "Open Dired at the root of the project under point.
+With a prefix argument, display it in the right-hand side window."
+  (interactive "P")
+  (let ((root (project-overview--root)))
+    (project-overview--maybe-side side (lambda () (dired root)))))
 
 ;; The following command mirrors an entry on the `project-switch-project'
 ;; menu, applied to the project under point.  It runs the standard
 ;; project.el command with the project context bound to that root.
 
-(defun project-overview--run-project-command (command)
-  "Call COMMAND with the project context set to the project under point."
+(defun project-overview--run-project-command (command &optional side)
+  "Call COMMAND with the project context set to the project under point.
+When SIDE is non-nil, display buffers in the right-hand side window."
   (let* ((root (project-overview--root))
          (default-directory root)
          (project-current-directory-override root))
-    (call-interactively command)))
+    (project-overview--maybe-side side (lambda () (call-interactively command)))))
 
-(defun project-overview-vc-dir ()
-  "Run `project-vc-dir' in the project under point."
-  (interactive)
-  (project-overview--run-project-command #'project-vc-dir))
+(defun project-overview-vc-dir (&optional side)
+  "Run `project-vc-dir' in the project under point.
+With a prefix argument, display it in the right-hand side window."
+  (interactive "P")
+  (project-overview--run-project-command #'project-vc-dir side))
 
 (defun project-overview-changelog ()
   "Visit CHANGELOG.org of the project under point in a window to the right."
