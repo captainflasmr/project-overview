@@ -74,7 +74,8 @@
 
 ;; In the dashboard:
 ;;   RET/o switch · m magit · w browse remote · D dired
-;;   C changelog · R README · b BUGS · i/P GitHub issues/PRs
+;;   C changelog · R README · b BUGS · i/r GitHub issues/PRs
+;;   P pull this project (C-u P pulls all repos)
 ;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "g" GitHub)
 ;;   V cycle view · g refresh
 ;;   ? all actions (incl. cache/pull) · TAB / S-TAB move between columns

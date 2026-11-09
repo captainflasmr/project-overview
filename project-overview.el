@@ -60,12 +60,12 @@
 ;;   v/SPC    vc-dir                   R  open README (window right)
 ;;   m        magit-status             b  open BUGS.org (window right)
 ;;   w        browse remote in browser A  TODO agenda for all projects' bugs
-;;                                     /  filter the view (transient)
-;;                                     g  refresh (re-scan)
+;;   P        git pull this project    /  filter the view (transient)
+;;            (C-u P: all repos)       g  refresh (re-scan)
 ;;                                     ?  transient menu of all actions
 ;;                                     V  cycle column layout
 ;;                                     i  open GitHub issues (Org buffer)
-;;                                     P  open GitHub PRs (Org buffer)
+;;                                     r  open GitHub PRs (Org buffer)
 ;;
 ;; `/' (`project-overview-filter-dispatch') narrows the table to a subset:
 ;; dirty repos, repos with open bugs, repos out of sync with upstream,
@@ -100,11 +100,10 @@
 ;; and an ordinary refresh (`g') need not hit the network.  The `?'
 ;; dispatch exposes the cache and pull commands at its top level: `p'
 ;; force-refreshes the GitHub counts, `L' the MELPA list, `a'
-;; everything, while `G' runs a real \"git pull\" over every repository
-;; with a remote a few at a time (`project-overview-pull-args',
-;; \"--ff-only\" by default) and `u' pulls just the project under point,
-;; re-scanning the dashboard when the pulls finish; `c' clears the
-;; on-disk cache.
+;; everything, while `P' runs a real \"git pull\" on the project under
+;; point (`C-u P' over every repository with a remote) a few at a time
+;; (`project-overview-pull-args', \"--ff-only\" by default), re-scanning
+;; the dashboard when the pulls finish; `c' clears the on-disk cache.
 ;;
 ;; Both CHANGELOG.org and BUGS.org parsing assume the common org layout:
 ;;
@@ -1887,6 +1886,14 @@ re-scanned and any failures are listed in a side buffer."
       (user-error "This project has no git remote to pull"))
     (project-overview--pull-start (list root))))
 
+(defun project-overview-pull (&optional all)
+  "Pull the project under point.
+With a prefix argument, pull every repository that has a remote."
+  (interactive "P")
+  (if all
+      (project-overview-pull-repos)
+    (project-overview-pull-repo)))
+
 ;;; Filtering
 
 (defun project-overview--filter-dirty (cell)
@@ -2006,6 +2013,7 @@ shown/total counts and redraws."
     ("D" "dired"             project-overview-dired)
     ("v" "vc-dir"            project-overview-vc-dir)
     ("m" "magit-status"      project-overview-magit)
+    ("P" "pull (C-u: all projects)" project-overview-pull)
     ("w" "browse remote"     project-overview-browse-remote)]
    ["Inspect"
     ("." "detail card"       project-overview-show-detail)
@@ -2015,14 +2023,12 @@ shown/total counts and redraws."
     ("B" "bugs agenda"       project-overview-bugs-agenda)
     ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)
     ("i" "GitHub issues"     project-overview-github-issues)
-    ("P" "GitHub PRs"        project-overview-github-prs)]
-   ["Cache & pull"
-    ("p" "GitHub counts"      project-overview-pull-github)
-    ("L" "MELPA list"         project-overview-pull-melpa)
-    ("a" "everything"         project-overview-pull-all)
-    ("G" "pull all repos"     project-overview-pull-repos)
-    ("u" "pull this project"  project-overview-pull-repo)
-    ("c" "clear cache"        project-overview-cache-clear)]
+    ("r" "GitHub PRs"        project-overview-github-prs)]
+   ["Refresh data"
+    ("p" "GitHub counts" project-overview-pull-github)
+    ("L" "MELPA list"    project-overview-pull-melpa)
+    ("a" "everything"    project-overview-pull-all)
+    ("c" "clear cache"   project-overview-cache-clear)]
    ["Dashboard"
     ("/" "filter…"        project-overview-filter-dispatch)
     ("V" "cycle view"     project-overview-cycle-view :transient t)
@@ -2153,7 +2159,8 @@ screen), and the filter name is appended."
     (define-key map "B" #'project-overview-bugs-agenda)
     (define-key map "A" #'project-overview-bugs-agenda-all)
     (define-key map "i" #'project-overview-github-issues)
-    (define-key map "P" #'project-overview-github-prs)
+    (define-key map "r" #'project-overview-github-prs)
+    (define-key map "P" #'project-overview-pull)
     ;; Dashboard.
     (define-key map "/" #'project-overview-filter-dispatch)
     (define-key map "V" #'project-overview-cycle-view)

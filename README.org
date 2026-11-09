@@ -55,29 +55,28 @@ Single keys act on the project under point.  =o= opens the =project-switch-proje
 | =b=         | open =BUGS.org= in a window to the right      |
 | =B=         | TODO agenda scoped to this project's bugs     |
 | =A=         | TODO agenda for every project's bugs          |
-| =i= / =P=   | open GitHub issues / PRs in a side buffer     |
+| =i= / =r=   | open GitHub issues / PRs in a side buffer     |
+| =P=         | =git pull= this project (=C-u P=: all repos)  |
 | =/=         | filter the view (transient)                   |
 | =g=         | refresh (re-scan)                             |
 | =?=         | transient menu of all the above               |
 
 * Cache and pull
 
-These commands live in the =?= dispatch (they are not bound directly in the dashboard):
+The =?= dispatch also offers cache and network-refresh commands:
 
 | Key | Action                                    |
 |-----+-------------------------------------------|
 | =p= | force-refresh GitHub issue/PR counts      |
 | =L= | force-refresh the MELPA package list      |
 | =a= | re-scan and force-refresh everything      |
-| =G= | =git pull= every repository with a remote |
-| =u= | =git pull= the project under point        |
 | =c= | clear the on-disk cache                   |
 
 A normal refresh (=g=) reuses cached network data while it is fresh; these commands force a re-fetch or clear the cache.  Network data (the MELPA list and per-repository GitHub counts) is cached in =project-overview-cache-file= for =project-overview-cache-ttl= seconds, so it survives restarts.
 
 * GitHub integration
 
-For GitHub-hosted projects the =GitHub= column shows the open issue and PR counts (via the =gh= CLI, which must be installed and authenticated).  =i= (=project-overview-github-issues=) and =P= (=project-overview-github-prs=) open the project's open issues or pull requests in an Org buffer — one heading per item with author, creation date, labels, URL, and body — in the shared right-hand window.  =w= opens the repository itself in a browser.
+For GitHub-hosted projects the =GitHub= column shows the open issue and PR counts (via the =gh= CLI, which must be installed and authenticated).  =i= (=project-overview-github-issues=) and =r= (=project-overview-github-prs=) open the project's open issues or pull requests in an Org buffer — one heading per item with author, creation date, labels, URL, and body — in the shared right-hand window.  =w= opens the repository itself in a browser.
 
 * Filtering
 
@@ -108,7 +107,7 @@ Press =.= (=project-overview-show-detail=) to open a per-project "card" in a win
 
 It reuses the already-scanned data, so it is near-instant — handy for a quick "what is going on with this repo?" without switching to it.
 
-All of the right-hand views — the detail card, the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the GitHub issue/PR panels (=i=/=P=) — share a single side window: opening another reuses that one window rather than splitting off a new one.  None of them take focus, so point always stays on the dashboard and you can keep moving down the list to flip through projects.
+All of the right-hand views — the detail card, the =CHANGELOG.org=/=BUGS.org=/README visits (=C=/=b=/=R=) and the GitHub issue/PR panels (=i=/=r=) — share a single side window: opening another reuses that one window rather than splitting off a new one.  None of them take focus, so point always stays on the dashboard and you can keep moving down the list to flip through projects.
 
 * Scanning
 
