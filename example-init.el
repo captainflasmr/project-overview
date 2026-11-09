@@ -35,10 +35,6 @@
   ;; and one level deep for .git subdirectories.
   (project-overview-search-roots
    (list "~/source/repos" "~/.emacs.d"))
-  ;; Also include the projects Emacs already knows about
-  ;; (`project-known-project-roots'); non-git projects show blank git
-  ;; columns.  Default t.
-  (project-overview-include-known-projects t)
   ;; Hide project directories whose name matches this regexp.
   (project-overview-exclude-regexp "\\`\\(?:linux-\\|melpa\\'\\)")
   ;; Name of the dashboard buffer.

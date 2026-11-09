@@ -26,9 +26,7 @@
 ;;; Commentary:
 ;; A central, sortable table of your git projects.  `project-overview'
 ;; opens a `tabulated-list-mode' buffer with one row per project: the git
-;; repositories found under `project-overview-search-roots' plus, when
-;; `project-overview-include-known-projects' is on, the projects Emacs
-;; already knows about (the `project-switch-project' list).  Each row
+;; repositories found under `project-overview-search-roots'.  Each row
 ;; shows:
 ;;
 ;;   - the latest CHANGELOG.org version and date,
@@ -39,7 +37,6 @@
 ;;   - for GitHub repos, the open issue and PR counts (via the gh CLI),
 ;;     highlighted when new issues or PRs have appeared since the last
 ;;     time they were reviewed,
-;;   - a check mark when the project is on Emacs's known-projects list,
 ;;   - a check mark when a package of the same name is available on MELPA,
 ;;   - the last commit date,
 ;;   - a one-line description taken from the project's README, and
@@ -56,11 +53,11 @@
 ;; row (`tabulated-list-next-column' / `tabulated-list-previous-column').
 ;;
 ;; Single keys act on the project under point, reusing project.el where
-;; possible.  `RET' / `o' opens the full `project-switch-project' menu;
+;; possible.  `RET' / `o' opens the full `project-switch-project' dispatch;
 ;; the other keys are listed below.  See `project-overview-mode-map'
 ;; for the full set:
 ;;
-;;   RET / o  switch to project        .  detail card (window right)
+;;   RET / o  project dispatch        .  detail card (window right)
 ;;   D        dired at root            C  open CHANGELOG.org (window right)
 ;;   v/SPC    vc-dir                   R  open README (window right)
 ;;   m        magit-status             b  open BUGS.org (window right)
@@ -146,7 +143,6 @@
 (declare-function org-todo-list "org-agenda" (&optional arg))
 (declare-function org-mode "org" ())
 (declare-function org-display-inline-images "org" (&optional include-linked refresh beg end))
-(declare-function project-known-project-roots "project" ())
 (defvar org-agenda-files)
 (defvar org-agenda-prefix-format)
 (defvar org-agenda-sticky)
@@ -174,14 +170,6 @@ Each root is checked directly and one level deep for .git subdirs."
 (defcustom project-overview-exclude-regexp "\\`linux-"
   "Projects whose directory name matches this regexp are hidden."
   :type 'regexp
-  :group 'project-overview)
-
-(defcustom project-overview-include-known-projects t
-  "When non-nil, also list projects Emacs already knows about.
-These are the roots offered by `project-switch-project', as returned by
-`project-known-project-roots', merged with the git repositories found
-under `project-overview-search-roots'."
-  :type 'boolean
   :group 'project-overview)
 
 (defcustom project-overview-buffer-name "*Projects*"
@@ -279,11 +267,11 @@ processes."
   :group 'project-overview)
 
 (defcustom project-overview-views
-  '((full    . (name version changelog bugs branch git remote owner github known
+  '((full    . (name version changelog bugs branch git remote owner github
                      melpa commit subject description path))
     (minimal . (name version bugs commit path))
     (status  . (name bugs branch git github commit subject))
-    (remote  . (name remote owner github known melpa path)))
+    (remote  . (name remote owner github melpa path)))
   "Named column layouts for the dashboard.
 Each entry is (NAME . COLUMNS) where COLUMNS is a list of column ids
 drawn from `project-overview--columns'.  `project-overview-set-view'
@@ -366,9 +354,6 @@ non-nil."
   "Snapshot of `project-overview--cache' taken when the async scan began.
 Cells for not-yet-rescanned roots are shown from here so existing rows
 do not vanish mid-scan.")
-
-(defvar project-overview--scan-known nil
-  "Known-roots hash captured for the duration of an async scan.")
 
 (defvar project-overview--scan-melpa nil
   "MELPA package-name set captured for the duration of an async scan.")
@@ -502,11 +487,8 @@ dashboard has no project rows."
 (defun project-overview--discover ()
   "Return the sorted list of project roots to display.
 Combines git repositories found under `project-overview-search-roots'
-\(each root and one level of subdirectories) with the projects Emacs
-already knows about — `project-known-project-roots', the same list
-`project-switch-project' offers — when
-`project-overview-include-known-projects' is non-nil.  Roots are
-normalised and de-duplicated; missing directories and names matching
+\(each root and one level of subdirectories).  Roots are normalised and
+de-duplicated; missing directories and names matching
 `project-overview-exclude-regexp' are dropped."
   (let (roots)
     ;; Git repositories under the configured search roots.
@@ -519,10 +501,6 @@ normalised and de-duplicated; missing directories and names matching
           (when (and (file-directory-p sub)
                      (file-directory-p (expand-file-name ".git" sub)))
             (push sub roots)))))
-    ;; Projects Emacs already knows about (the `project-switch-project' list).
-    (when (and project-overview-include-known-projects
-               (fboundp 'project-known-project-roots))
-      (setq roots (nconc (project-known-project-roots) roots)))
     ;; Normalise, drop missing/excluded, de-duplicate, and sort.
     (let ((seen (make-hash-table :test 'equal))
           result)
@@ -536,16 +514,6 @@ normalised and de-duplicated; missing directories and names matching
             (puthash dir t seen)
             (push dir result))))
       (sort result #'string<))))
-
-(defun project-overview--known-roots ()
-  "Return a hash table of normalised `project-known-project-roots'.
-Keys match the normalised roots produced by `project-overview--discover',
-so membership can be tested with `gethash'."
-  (let ((h (make-hash-table :test 'equal)))
-    (when (fboundp 'project-known-project-roots)
-      (dolist (r (project-known-project-roots))
-        (puthash (directory-file-name (expand-file-name r)) t h)))
-    h))
 
 (defun project-overview--melpa-local-names ()
   "Return a hash table of package names (symbols) available from MELPA.
@@ -883,11 +851,11 @@ Keys: :branch :dirty :commit :subject :ahead :behind :host :owner :repo."
           :ahead (or ahead 0) :behind (or behind 0)
           :host host :owner owner :repo repo)))
 
-(defun project-overview--scan-cell (root known melpa)
+(defun project-overview--scan-cell (root melpa)
   "Build and return the cache cell (ROOT . PLIST) for project ROOT.
-KNOWN and MELPA are the lookup tables from `project-overview--known-roots'
-and `project-overview--melpa-names'.  This probes git and reads the
-project's CHANGELOG/BUGS/README, so it is the slow part of a scan."
+MELPA is the lookup table from `project-overview--melpa-names'.  This
+probes git and reads the project's CHANGELOG/BUGS/README, so it is the
+slow part of a scan."
   (let* ((cl (project-overview--changelog root))
          (bugs (project-overview--bugs root))
          (git (project-overview--git-info root))
@@ -899,16 +867,14 @@ project's CHANGELOG/BUGS/README, so it is the slow part of a scan."
                 :open (car bugs)
                 :total (cdr bugs)
                 :desc (project-overview--description root)
-                :known (and (gethash root known) t)
                 :melpa (and (gethash (intern name) melpa) t)
                 :git git))))
 
 (defun project-overview--scan ()
   "Scan all discovered projects synchronously into `project-overview--cache'."
-  (let ((known (project-overview--known-roots))
-        (melpa (project-overview--melpa-names)))
+  (let ((melpa (project-overview--melpa-names)))
     (setq project-overview--cache
-          (mapcar (lambda (root) (project-overview--scan-cell root known melpa))
+          (mapcar (lambda (root) (project-overview--scan-cell root melpa))
                   (project-overview--discover)))))
 
 ;;; Asynchronous (incremental) scanning
@@ -944,7 +910,6 @@ cell from `project-overview--scan-old' so their row stays on screen."
                 (< n (max 1 project-overview-async-batch-size)))
       (let ((root (pop project-overview--scan-queue)))
         (push (project-overview--scan-cell root
-                                           project-overview--scan-known
                                            project-overview--scan-melpa)
               project-overview--scan-acc))
       (setq n (1+ n))))
@@ -973,8 +938,7 @@ Rows appear immediately, reusing the previous scan's data until each
 project is re-probed.  When the scan completes the GitHub and MELPA
 fetches run, forced when FORCE is non-nil."
   (project-overview--scan-cancel)
-  (setq project-overview--scan-known (project-overview--known-roots)
-        project-overview--scan-melpa (project-overview--melpa-names)
+  (setq project-overview--scan-melpa (project-overview--melpa-names)
         project-overview--scan-old   project-overview--cache
         project-overview--scan-queue (project-overview--discover)
         project-overview--scan-total (length project-overview--scan-queue)
@@ -1505,8 +1469,6 @@ face, and a project with unread new items is flagged with a leading
          (lambda (c) (or (plist-get (plist-get (cdr c) :git) :owner) "")))
    (list 'github      '("GitHub" 8 t)
          #'project-overview--col-github)
-   (list 'known       '("K" 2 t)
-         (lambda (c) (if (plist-get (cdr c) :known) "✓" "")))
    (list 'melpa       '("M" 2 t)
          (lambda (c) (if (plist-get (cdr c) :melpa) "✓" "")))
    (list 'commit      '("Commit" 17 t)
@@ -1678,7 +1640,8 @@ When FORWARD is non-nil move downward, otherwise upward."
   (project-overview--goto-dirty nil))
 
 (defun project-overview-open ()
-  "Switch to the project under point via `project-switch-project'."
+  "Dispatch a project command for the project under point.
+Uses the `project-switch-project' command menu."
   (interactive)
   (project-switch-project (project-overview--root)))
 
@@ -1821,7 +1784,6 @@ scanned cache; the only fresh work is a couple of cheap local reads."
           (insert (format ":GITHUB:   %d issues, %d PRs%s\n"
                           (or (car gh) 0) (or (cdr gh) 0)
                           (if unread (format "  (%d new)" (length unread)) ""))))
-        (insert (format ":KNOWN:    %s\n" (if (plist-get p :known) "yes" "no")))
         (insert (format ":MELPA:    %s\n" (if (plist-get p :melpa) "yes" "no")))
         (when web (insert (format ":URL:      %s\n" web)))
         (insert ":END:\n\n")
@@ -2289,7 +2251,7 @@ shown/total counts and redraws."
   [:description
    (lambda () (concat "Project: " (or (project-overview--menu-name) "(none)")))
    ["Find"
-    ("o" "switch to project" project-overview-open)
+    ("o" "project dispatch"  project-overview-open)
     ("D" "dired"             project-overview-dired)]
    ["Inspect"
     ("." "detail card"       project-overview-show-detail)

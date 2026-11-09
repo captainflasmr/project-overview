@@ -4,13 +4,13 @@
 #+language: en
 #+options: ':t toc:nil author:nil email:nil num:nil title:nil
 
-A central, sortable table of your git projects. =M-x project-overview= opens a =tabulated-list-mode= buffer with one row per project — the git repositories found under =project-overview-search-roots= plus the projects Emacs already knows about (the =project-switch-project= list) — surfacing the kind of status you usually have to dig for:
+A central, sortable table of your git projects. =M-x project-overview= opens a =tabulated-list-mode= buffer with one row per project — the git repositories found under =project-overview-search-roots= — surfacing the kind of status you usually have to dig for:
 
 #+begin_example
-Project                   Version  ChangeLog   Bugs  Branch  Git  Remote  Owner          K  M  Commit            Last Commit
-ollama-buddy              7.5.3    2026-05-19  2/15  main    *    github  captainflasmr  ✓  ✓  2026-06-02 14:32  Add streaming response handler
-simply-annotate           1.2.0    2026-05-31  4/9   develop ↑2   github  captainflasmr  ✓     2026-05-31 09:18  Fix overlay refresh on save
-bank-buddy                0.3.1    2026-01-16        main         gitlab  somegroup            2026-01-16 21:05  Tidy up category parsing
+Project          Version  ChangeLog   Bugs  Branch      Git  Remote  Owner          M  Commit            Last Commit
+ollama-buddy     7.5.3    2026-05-19  2/15  main        *    github  captainflasmr  ✓  2026-06-02 14:32  Add streaming response handler
+simply-annotate  1.2.0    2026-05-31  4/9   develop ↑2       github  captainflasmr     2026-05-31 09:18  Fix overlay refresh on save
+bank-buddy       0.3.1    2026-01-16        main             gitlab  somegroup         2026-01-16 21:05  Tidy up category parsing
 #+end_example
 
 The table opens sorted by =Commit= date/time, most recently committed first.
@@ -23,7 +23,6 @@ The table opens sorted by =Commit= date/time, most recently committed first.
 - *Remote* :: the forge hosting the =origin= remote — =github=, =gitlab=, =codeberg=, =bitbucket=, =sourcehut=, or the bare host for anything else.  Blank for repositories with no remote (local only).
 - *Owner* :: the owner/user segment of the remote URL — e.g. the GitHub username or organisation (=alice= for =github.com/alice/repo=).
 - *GitHub* :: open issue/PR counts for GitHub-hosted repositories (e.g. =3i 1p=), fetched asynchronously with the =gh= CLI.  A project with new, unread issues or PRs is highlighted (name in red) and flagged with a leading =●= until acknowledged.
-- *K (Known)* :: =✓= when the project is on Emacs's known-projects list (=project-known-project-roots=, the =project-switch-project= list); blank otherwise.
 - *M (MELPA)* :: =✓= when a package matching the project's directory name is available from MELPA; blank otherwise.
 - *Commit* :: date and time of the last commit (=YYYY-MM-DD HH:MM=), giving a granular default sort.
 - *Last Commit* :: the subject (first line) of the most recent commit message.
@@ -43,11 +42,11 @@ The mode line shows the full (abbreviated) path of the project under point, upda
 
 * Actions
 
-Single keys act on the project under point.  =o= opens the full =project-switch-project= menu for that project, so its file-finding and shell commands are not duplicated here:
+Single keys act on the project under point.  =o= opens the =project-switch-project= dispatch for that project, so its file-finding and shell commands are not duplicated here:
 
 | Key         | Action                                        |
 |-------------+-----------------------------------------------|
-| =RET= / =o= | switch to project (=project-switch-project=)  |
+| =RET= / =o= | project dispatch (=project-switch-project=)   |
 | =v= / =SPC= | =project-vc-dir=                              |
 | =m=         | =magit-status=                                |
 | =D=         | dired at root                                 |
@@ -113,7 +112,7 @@ Prefer a menu? =?= (=project-overview-dispatch=) opens a transient with the same
 
 Press =.= (=project-overview-show-detail=) to open a per-project "card" in a window to the right — an Org buffer that gathers everything the dashboard knows about the project under point into one place:
 
-- status: version and changelog date, branch and git state, last commit, remote (host / owner / repo), known-projects and MELPA flags, open GitHub issue/PR counts (when fetched), and the README description;
+- status: version and changelog date, branch and git state, last commit, remote (host / owner / repo), MELPA flag, open GitHub issue/PR counts (when fetched), and the README description;
 - the open =BUGS.org= headings; and
 - the ten most recent commits.
 
@@ -145,7 +144,6 @@ By default the dashboard scans *incrementally*: it appears immediately and fills
 * Customization
 
 - =project-overview-search-roots= :: directories scanned for git projects.  Each root is checked directly and one level deep for =.git= subdirs.
-- =project-overview-include-known-projects= :: when non-nil (the default), also list the projects Emacs already knows about — the same roots =project-switch-project= offers (=project-known-project-roots=) — merged with those found under =project-overview-search-roots=.  These need not be git repositories; non-git projects simply show blank git columns.
 - =project-overview-exclude-regexp= :: project directory names matching this regexp are hidden.
 - =project-overview-buffer-name= :: name of the dashboard buffer.
 - =project-overview-show-github= :: when non-nil (the default), fetch open issue/PR counts for GitHub repositories with the =gh= CLI.
