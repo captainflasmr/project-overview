@@ -56,11 +56,6 @@
   ;; Your GitHub username: its repos' open issue/PR totals are summarised
   ;; in the header line, and the "owned by me" filter (/ o) uses it.
   (project-overview-github-user "your-github-username")
-  ;; How to announce newly raised GitHub issues/PRs: 'message (default)
-  ;; echoes a summary, 'all also raises a desktop notification via
-  ;; `notifications-notify', nil leaves only the dashboard highlights.
-  ;; Projects with new items stay flagged until marked seen with M.
-  (project-overview-github-notify 'message)
   ;; Function used to open a remote in a browser (w).  Defaults to
   ;; `browse-url' (system default); set to e.g. `browse-url-firefox'.
   (project-overview-browse-url-function #'browse-url)
@@ -80,8 +75,7 @@
 ;; In the dashboard:
 ;;   RET/o switch · m magit · w browse remote · D dired
 ;;   C changelog · R README · b BUGS · i/P GitHub issues/PRs
-;;   M mark new GitHub items seen (C-u M for all projects)
-;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "N" new GitHub)
+;;   / filter (incl. "o" owned-by-me, "m" on-MELPA, "g" GitHub)
 ;;   V cycle view · g refresh
 ;;   ? all actions (incl. cache/pull) · TAB / S-TAB move between columns
 
