@@ -2001,9 +2001,12 @@ shown/total counts and redraws."
   "Act on the project under point in the `project-overview' dashboard."
   [:description
    (lambda () (concat "Project: " (or (project-overview--menu-name) "(none)")))
-   ["Find"
+   ["Find & VC"
     ("o" "project dispatch"  project-overview-open)
-    ("D" "dired"             project-overview-dired)]
+    ("D" "dired"             project-overview-dired)
+    ("v" "vc-dir"            project-overview-vc-dir)
+    ("m" "magit-status"      project-overview-magit)
+    ("w" "browse remote"     project-overview-browse-remote)]
    ["Inspect"
     ("." "detail card"       project-overview-show-detail)
     ("C" "CHANGELOG.org"     project-overview-changelog)
@@ -2013,10 +2016,6 @@ shown/total counts and redraws."
     ("A" "bugs agenda (all)" project-overview-bugs-agenda-all)
     ("i" "GitHub issues"     project-overview-github-issues)
     ("P" "GitHub PRs"        project-overview-github-prs)]
-   ["VC"
-    ("v" "vc-dir"            project-overview-vc-dir)
-    ("m" "magit-status"      project-overview-magit)
-    ("w" "browse remote"     project-overview-browse-remote)]
    ["Cache & pull"
     ("p" "GitHub counts"      project-overview-pull-github)
     ("L" "MELPA list"         project-overview-pull-melpa)
